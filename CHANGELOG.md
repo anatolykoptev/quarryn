@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/anatolykoptev/go-product-search/compare/v1.3.1...v1.3.2) (2026-09-25)
+
+
+### Fixed
+
+* **extract:** navigate outbound hop via request URL, not in-session action ([#33](https://github.com/anatolykoptev/go-product-search/issues/33)) ([e4062ec](https://github.com/anatolykoptev/go-product-search/commit/e4062ecbb19799277118d3b1ec33927ce4fd18a0))
+
 ## [1.3.1](https://github.com/anatolykoptev/go-product-search/compare/v1.3.0...v1.3.1) (2026-09-25)
 
 
