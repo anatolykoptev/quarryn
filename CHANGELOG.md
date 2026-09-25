@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/anatolykoptev/go-product-search/compare/v1.3.0...v1.3.1) (2026-09-25)
+
+
+### Fixed
+
+* **extract:** decode string-wrapped interact payloads ([#31](https://github.com/anatolykoptev/go-product-search/issues/31)) ([02ddd7a](https://github.com/anatolykoptev/go-product-search/commit/02ddd7a6f6b589518b6231b06b7da8eb4cef21dd))
+
 ## [1.3.0](https://github.com/anatolykoptev/go-product-search/compare/v1.2.0...v1.3.0) (2026-09-25)
 
 
