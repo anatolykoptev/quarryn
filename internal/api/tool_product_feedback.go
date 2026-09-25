@@ -31,7 +31,7 @@ func registerProductFeedback(srv *mcp.Server, d deps) {
 	mcpserver.AddTool(srv, &mcp.Tool{
 		Name:        toolProductFeedback,
 		Description: productFeedbackDesc,
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in productFeedbackInput) (*mcp.CallToolResult, error) {
 		return handleProductFeedback(d, in)
 	})

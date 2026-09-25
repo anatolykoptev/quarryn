@@ -202,6 +202,9 @@ func (g *FetchGate) Fetch(ctx context.Context, req wowa.FetchRequest) (*wowa.Fet
 		if err != nil {
 			return 0, err
 		}
+		if r == nil {
+			return 0, errors.New("sources: nil response without error")
+		}
 		return r.Status, nil
 	})
 	if err != nil {
@@ -224,6 +227,9 @@ func (g *FetchGate) Render(ctx context.Context, req wowa.RenderRequest) (*wowa.R
 		}
 		if err != nil {
 			return 0, err
+		}
+		if r == nil {
+			return 0, errors.New("sources: nil response without error")
 		}
 		return r.Status, nil
 	})
