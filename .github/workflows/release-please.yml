@@ -1,0 +1,30 @@
+name: release-please
+
+# Conventional-commit-driven versioning ONLY (tag + GitHub release + changelog).
+# This job is lightweight and stays on GitHub-hosted runners (free tier).
+#
+# Binaries are NOT built here: docker builds are heavy and would consume PAID
+# GitHub Actions minutes (operator rule: never use paid GHA). Deploys are
+# handled by dozor on the krolik box, triggered by the GitHub release webhook
+# (repo is registered in config/dozor/deploy-repos.yaml with
+# deploy_on: release).
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

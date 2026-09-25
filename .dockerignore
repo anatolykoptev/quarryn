@@ -1,0 +1,9 @@
+# .git stays in the build context — the Dockerfile stamps the binary version
+# via `git describe --tags --always`.
+bin/
+tmp/
+*.log
+.github/
+.pre-commit-config.yaml
+.golangci.yml
+.dockerignore
