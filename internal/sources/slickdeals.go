@@ -66,7 +66,9 @@ func NewSlickdeals(fetcher Fetcher, feedURL string) Adapter {
 func (a *slickdealsAdapter) Name() string { return "slickdeals" }
 
 // Spec implements Adapter.
-func (a *slickdealsAdapter) Spec() SourceSpec { return SourceSpec{FetchClass: FetchClassFetch} }
+func (a *slickdealsAdapter) Spec() SourceSpec {
+	return SourceSpec{FetchClass: FetchClassFetch, ResolveOutbound: true}
+}
 
 // Enabled implements Adapter — needs a wowa fetcher, nothing else.
 func (a *slickdealsAdapter) Enabled() bool { return a.fetch != nil }

@@ -106,6 +106,11 @@ type Config struct {
 	// Render-class sources route detail work through Render instead of
 	// the plain fetcher. Unknown sources default to fetch.
 	FetchClasses map[string]sources.FetchClass
+	// ResolveOutbound marks deal-aggregator sources (SourceSpec) whose
+	// SERP-complete cards still deserve an interact session to resolve
+	// the outbound merchant link — the card URL is a thread, not a
+	// buyable page.
+	ResolveOutbound map[string]bool
 	// Cache is the ADR-7 extraction cache (L1 + optional Redis L2).
 	// Injected, not wrapped; nil disables caching.
 	Cache *cache.Cache
@@ -198,6 +203,11 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 			return ec
 		}
 		outcome = p.extractDetail(ctx, rank, c, &prod, &ec, budget)
+	} else if p.cfg.ResolveOutbound[c.Source] && prod.BuyURL == "" {
+		// SERP-complete card on a deal aggregator: the product is usable
+		// as-is, but the buyable merchant link lives behind the thread's
+		// outbound tracker — resolve it when the interact budget allows.
+		p.tryInteract(ctx, rank, c, &prod, budget)
 	}
 
 	if probs := prod.problems(); len(probs) > 0 {

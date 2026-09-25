@@ -104,8 +104,11 @@ func New(cfg config.Config) (*Searcher, error) {
 // sources escalate correctly.
 func newPipeline(cfg config.Config, gate *pssources.FetchGate, llm extract.LLMCaller, registry map[string]pssources.Adapter) *extract.Pipeline {
 	classes := make(map[string]pssources.FetchClass, len(registry))
+	outbound := make(map[string]bool, len(registry))
 	for name, a := range registry {
-		classes[name] = a.Spec().FetchClass
+		spec := a.Spec()
+		classes[name] = spec.FetchClass
+		outbound[name] = spec.ResolveOutbound
 	}
 	return extract.New(gate, llm, extract.Config{
 		LLMTopN:          cfg.ExtractLLMTopN,
@@ -117,6 +120,7 @@ func newPipeline(cfg config.Config, gate *pssources.FetchGate, llm extract.LLMCa
 		Render:           gate,
 		Interact:         gate,
 		FetchClasses:     classes,
+		ResolveOutbound:  outbound,
 		Cache:            newExtractCache(cfg),
 	})
 }
