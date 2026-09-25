@@ -486,9 +486,15 @@ func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidat
 	// Deal aggregators keep the buyable URL behind an outbound tracker
 	// (slickdeals /click). Follow it in-session — the merchant page may
 	// carry real Product schema the thread never had.
-	if click != "" && budget.Add(-1) >= 0 {
-		merged = p.interactOutbound(ctx, session, click, c, prod) || merged
+	if click == "" {
+		return merged
 	}
+	if budget.Add(-1) < 0 {
+		slog.Warn("extract: outbound hop skipped, detail budget spent",
+			slog.String("url", c.URL))
+		return merged
+	}
+	merged = p.interactOutbound(ctx, session, click, c, prod) || merged
 	return merged
 }
 
@@ -540,7 +546,7 @@ func (p *Pipeline) interactOutbound(ctx context.Context, session, click string, 
 		TimeoutSecs: 45,
 		Session:     session,
 		Actions: []wowa.Action{
-			{Type: "wait_for", WaitMs: 4000},
+			{Type: "wait_for", WaitMs: 8000},
 			{Type: "evaluate", Script: `JSON.stringify({u:location.href,h:document.head?document.head.outerHTML.slice(0,400000):""})`},
 			{Type: "destroy_session"},
 		},
@@ -551,7 +557,14 @@ func (p *Pipeline) interactOutbound(ctx context.Context, session, click string, 
 		return false
 	}
 	body, landed := interactPayload(resp)
-	if landed != "" && domainOf(landed) != domainOf(c.URL) {
+	switch {
+	case landed == "":
+		slog.Warn("extract: hop returned no landing URL",
+			slog.String("url", c.URL))
+	case domainOf(landed) == domainOf(c.URL):
+		slog.Warn("extract: hop never left the aggregator",
+			slog.String("url", c.URL), slog.String("landed", landed))
+	default:
 		if p.schemaMergeURL(landed, body, prod) {
 			prod.Method = MethodInteract
 			prod.BuyURL = cleanBuyURL(landed)
