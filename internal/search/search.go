@@ -81,8 +81,8 @@ func New(cfg config.Config) (*Searcher, error) {
 	// fetches and detail fetches/renders share the table so a throttled
 	// marketplace backs off for both stages.
 	pacer := pssources.NewDomainPacer(cfg.DomainMinInterval, 0)
-	serpGate := pssources.NewFetchGate(wc, nil, "serp", pacer)
-	detailGate := pssources.NewFetchGate(wc, wc, "detail", pacer)
+	serpGate := pssources.NewFetchGate(wc, nil, nil, "serp", pacer)
+	detailGate := pssources.NewFetchGate(wc, wc, wc, "detail", pacer)
 	registry := pssources.NewRegistry(pssources.RegistryConfigFromEnv(serpGate, nil))
 	s := &Searcher{
 		funnel:   pssources.NewFunnel(registry),
@@ -115,6 +115,7 @@ func newPipeline(cfg config.Config, gate *pssources.FetchGate, llm extract.LLMCa
 		FetchTimeoutSecs: cfg.ExtractFetchTimeoutSecs,
 		LLMDailyMax:      cfg.ExtractLLMDailyMax,
 		Render:           gate,
+		Interact:         gate,
 		FetchClasses:     classes,
 		Cache:            newExtractCache(cfg),
 	})

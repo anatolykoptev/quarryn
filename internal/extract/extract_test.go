@@ -338,3 +338,66 @@ func TestProductPublicIsEgressAllowlist(t *testing.T) {
 }
 
 func utf8Len(s string) int { return len([]rune(s)) }
+
+// stubInteracter is a hand-rolled Interacter counting calls; dom is the
+// DOM string the evaluate action returns.
+type stubInteracter struct {
+	calls atomic.Int64
+	dom   string
+	err   error
+}
+
+func (s *stubInteracter) Interact(context.Context, wowa.InteractRequest) (*wowa.InteractResponse, error) {
+	s.calls.Add(1)
+	if s.err != nil {
+		return nil, s.err
+	}
+	data, _ := json.Marshal(s.dom)
+	return &wowa.InteractResponse{Actions: []wowa.ActionResult{
+		{Action: "wait_for", Ok: true},
+		{Action: "evaluate", Ok: true, Data: data},
+	}}, nil
+}
+
+// TestEnrichInteractSolvesCF: fetch hits the managed-challenge transport
+// error and no renderer is wired — the live-session tier must deliver the
+// cleared DOM and its schema.org product.
+func TestEnrichInteractSolvesCF(t *testing.T) {
+	f := &stubFetcher{err: errors.New("remote error (http 502): cloudflare managed_challenge_200")}
+	i := &stubInteracter{dom: amazonProductHTML}
+	cfg := testConfig()
+	cfg.Interact = i
+	p := New(f, &stubExtractor{}, cfg)
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		cand("https://walled.example.com/p/1", "", nil),
+	})
+	if i.calls.Load() != 1 {
+		t.Fatalf("interact calls = %d, want 1", i.calls.Load())
+	}
+	if out[0].ExtractionFailed || out[0].Product.Method != MethodInteract {
+		t.Fatalf("cleared DOM should extract via interact: %+v", out[0])
+	}
+}
+
+// TestEnrichInteractTopNGate: the solve tier is expensive — only top-N
+// candidates get a live session.
+func TestEnrichInteractTopNGate(t *testing.T) {
+	f := &stubFetcher{err: errors.New("remote error (http 502): cloudflare managed_challenge_200")}
+	i := &stubInteracter{dom: amazonProductHTML}
+	cfg := testConfig()
+	cfg.Interact = i
+	cfg.LLMTopN = 1
+	p := New(f, &stubExtractor{}, cfg)
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		cand("https://walled.example.com/p/1", "", nil),
+		cand("https://walled.example.com/p/2", "", nil),
+	})
+	if i.calls.Load() != 1 {
+		t.Fatalf("interact must fire for top-1 only: calls = %d", i.calls.Load())
+	}
+	if out[1].ExtractionFailed != true {
+		// second candidate may still be rescued by the LLM stub — the gate
+		// assertion is on interact calls, not the outcome.
+		_ = out[1]
+	}
+}

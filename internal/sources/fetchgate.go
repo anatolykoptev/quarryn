@@ -160,6 +160,12 @@ func (p *DomainPacer) throttled(domain string) {
 	st.failures++
 }
 
+// Interacter is the wowa /api/v1/chrome/interact surface — a challenge-
+// clearing real-browser session (auto_bypass). *wowa.Client satisfies it.
+type Interacter interface {
+	Interact(ctx context.Context, req wowa.InteractRequest) (*wowa.InteractResponse, error)
+}
+
 // Renderer is the wowa /api/v1/render surface (stealth Chrome) the gate
 // also paces — a render is a page fetch for budget purposes.
 type Renderer interface {
@@ -172,19 +178,21 @@ type Renderer interface {
 // throttles the domain is skipped for the remainder of the search request.
 // The stage label ("serp" | "detail") feeds prodsearch_pages_fetched_total.
 type FetchGate struct {
-	fetch  Fetcher
-	render Renderer // may be nil — Render then fails fast
-	pacer  *DomainPacer
-	stage  string
+	fetch    Fetcher
+	render   Renderer   // may be nil — Render then fails fast
+	interact Interacter // may be nil — Interact then fails fast
+	pacer    *DomainPacer
+	stage    string
 }
 
-// NewFetchGate builds a gate over fetch (required) and render (optional)
-// sharing pacer. stage is the metric label for the calls it wraps.
-func NewFetchGate(fetch Fetcher, render Renderer, stage string, pacer *DomainPacer) *FetchGate {
+// NewFetchGate builds a gate over fetch (required), render and interact
+// (both optional) sharing pacer. stage is the metric label for the calls
+// it wraps.
+func NewFetchGate(fetch Fetcher, render Renderer, interact Interacter, stage string, pacer *DomainPacer) *FetchGate {
 	if pacer == nil {
 		pacer = NewDomainPacer(0, 0)
 	}
-	return &FetchGate{fetch: fetch, render: render, pacer: pacer, stage: stage}
+	return &FetchGate{fetch: fetch, render: render, interact: interact, pacer: pacer, stage: stage}
 }
 
 // Fetch runs one wowa /fetch through pacing → budget → call → throttle
@@ -206,6 +214,26 @@ func (g *FetchGate) Fetch(ctx context.Context, req wowa.FetchRequest) (*wowa.Fet
 			return 0, errors.New("sources: nil response without error")
 		}
 		return r.Status, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// Interact runs one wowa /chrome/interact through the same gate — a live
+// browser session is a page fetch for budget and pacing purposes.
+func (g *FetchGate) Interact(ctx context.Context, req wowa.InteractRequest) (*wowa.InteractResponse, error) {
+	if g.interact == nil {
+		return nil, errors.New("sources: interact requested but no interacter wired")
+	}
+	var resp *wowa.InteractResponse
+	err := g.run(ctx, req.URL, func() (int, error) {
+		r, err := g.interact.Interact(ctx, req)
+		if r != nil {
+			resp = r
+		}
+		return 0, err
 	})
 	if err != nil {
 		return nil, err

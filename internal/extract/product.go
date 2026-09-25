@@ -27,6 +27,9 @@ const (
 	MethodRender = "render"
 	// MethodLLM: the wowa /api/v1/extract fallback contributed.
 	MethodLLM = "llm"
+	// MethodInteract: a cleared live-browser session's DOM contributed
+	// (P-solve tier — the page stood behind a challenge /render lost).
+	MethodInteract = "interact"
 )
 
 // Product is the normalized record this stage emits. Fields originate from

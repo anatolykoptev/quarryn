@@ -47,7 +47,7 @@ func testPacer() *DomainPacer {
 }
 
 func gateFor(f *queueFetcher) *FetchGate {
-	return NewFetchGate(f, nil, "detail", testPacer())
+	return NewFetchGate(f, nil, nil, "detail", testPacer())
 }
 
 func gateReq(url string) wowa.FetchRequest {
@@ -162,7 +162,7 @@ func TestGateMinIntervalPacing(t *testing.T) {
 	f := &queueFetcher{queue: []gateStep{{status: 200}}}
 	pacer := testPacer()
 	pacer.minWait = 60 * time.Millisecond
-	g := NewFetchGate(f, nil, "serp", pacer)
+	g := NewFetchGate(f, nil, nil, "serp", pacer)
 
 	start := time.Now()
 	for i := 0; i < 3; i++ {
@@ -190,7 +190,7 @@ func TestGateMinIntervalPacing(t *testing.T) {
 func TestGateRenderSharesBudget(t *testing.T) {
 	f := &queueFetcher{queue: []gateStep{{status: 200}}}
 	r := &queueRenderer{}
-	g := NewFetchGate(f, r, "detail", testPacer())
+	g := NewFetchGate(f, r, nil, "detail", testPacer())
 	ctx := WithPageBudget(t.Context(), NewPageBudget(2))
 
 	if _, err := g.Fetch(ctx, gateReq("https://a.example.com/1")); err != nil {

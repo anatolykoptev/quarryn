@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -58,6 +59,14 @@ type Renderer interface {
 	Render(ctx context.Context, req wowa.RenderRequest) (*wowa.RenderResponse, error)
 }
 
+// Interacter is the wowa /api/v1/chrome/interact surface — a real stealth
+// Chrome session with auto_bypass that waits out a managed CF challenge
+// and returns the cleared DOM. The solve tier for detail pages that beat
+// the plain /render navigation. *wowa.Client satisfies it; nil disables.
+type Interacter interface {
+	Interact(ctx context.Context, req wowa.InteractRequest) (*wowa.InteractResponse, error)
+}
+
 // Config bundles pipeline limits and injected dependencies.
 type Config struct {
 	// LLMTopN gates the LLM fallback to the top-N funnel-ranked candidates
@@ -86,6 +95,11 @@ type Config struct {
 	// pages). The call consumes the same detail budget — render is a
 	// detail fetch. Nil keeps the P3 deferral (NeedsRender + skip).
 	Render Renderer
+	// Interact is the CF-solve tier between render and LLM: a live browser
+	// session (auto_bypass) that waits out managed challenges /render does
+	// not clear. Gated to top-N candidates — a session costs ~12s of real
+	// browser time. Counts against the detail budget. Nil disables.
+	Interact Interacter
 	// FetchClasses maps adapter name → declared FetchClass (ADR-13).
 	// Render-class sources route detail work through Render instead of
 	// the plain fetcher. Unknown sources default to fetch.
@@ -270,6 +284,11 @@ func (p *Pipeline) extractDetail(ctx context.Context, rank int, c sources.Candid
 			// wall.
 			ec.NeedsRender = true
 			if !declaredRender {
+				// Render could not clear the wall — try the live-session
+				// solve tier before spending an LLM call.
+				if p.tryInteract(ctx, rank, c, prod, budget) {
+					return ""
+				}
 				p.tryLLM(ctx, rank, c, prod, ec)
 			}
 			return outcome
@@ -401,6 +420,65 @@ func (p *Pipeline) schemaMerge(c sources.Candidate, body string, prod *Product) 
 	mergeMissing(prod, sp)
 	prod.Method = MethodSchema
 	return true
+}
+
+// tryInteract runs the CF-solve tier: wowa /chrome/interact with
+// auto_bypass — a real browser session that waits out the challenge and
+// returns the cleared DOM, which goes through the same schema.org parse as
+// a plain fetch. Gated to top-N funnel-ranked candidates like the LLM tier
+// (a session is expensive); counts against the detail budget. Returns true
+// when the recovered DOM merged product data.
+func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidate, prod *Product, budget *atomic.Int64) bool {
+	if p.cfg.Interact == nil || rank >= p.cfg.LLMTopN {
+		return false
+	}
+	if budget.Add(-1) < 0 {
+		return false
+	}
+	resp, err := p.cfg.Interact.Interact(ctx, wowa.InteractRequest{
+		URL:         c.URL,
+		AutoBypass:  true,
+		TimeoutSecs: 60,
+		Actions: []wowa.Action{
+			{Type: "wait_for", WaitMs: 12000},
+			{Type: "evaluate", Script: "document.documentElement.outerHTML"},
+		},
+	})
+	if err != nil {
+		slog.Warn("extract: interact solve failed",
+			slog.String("url", c.URL), slog.Any("error", err))
+		return false
+	}
+	for _, a := range resp.Actions {
+		if a.Action != "evaluate" || !a.Ok {
+			continue
+		}
+		var body string
+		if json.Unmarshal(a.Data, &body) != nil || len(body) < 512 {
+			continue
+		}
+		if p.schemaMerge(c, body, prod) {
+			prod.Method = MethodInteract
+			return true
+		}
+		if og := ogDescription(body); og != "" && prod.Description == "" {
+			prod.Description = og
+		}
+	}
+	return false
+}
+
+// ogDescription pulls <meta property="og:description"> from a DOM — thread
+// pages carry no Product schema, so the og blurb is the best jeff context
+// a cleared challenge page can give.
+var ogDescRe = regexp.MustCompile(`(?i)<meta[^>]+property="og:description"[^>]+content="([^"]*)"`)
+
+func ogDescription(html string) string {
+	m := ogDescRe.FindStringSubmatch(html)
+	if len(m) != 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
 }
 
 // tryLLM runs the fenced LLM tier when the gates allow: the ADR-2 top-N
