@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/anatolykoptev/go-product-search/compare/v1.1.0...v1.2.0) (2026-09-25)
+
+
+### Added
+
+* **extract:** follow deal trackers to merchant pages in interact tier ([#27](https://github.com/anatolykoptev/go-product-search/issues/27)) ([b30b42a](https://github.com/anatolykoptev/go-product-search/commit/b30b42a9396e7e578d1329f513e471d2a1d8aeb9))
+
 ## [1.1.0](https://github.com/anatolykoptev/go-product-search/compare/v1.0.4...v1.1.0) (2026-09-25)
 
 
