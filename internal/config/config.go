@@ -25,7 +25,7 @@ type Config struct {
 	// fails closed: every non-open route returns 401.
 	InternalSecret string
 
-	// RedisURL enables the optional result cache. Empty = no cache.
+	// RedisURL enables the optional L2 caches. Empty = L1-only.
 	RedisURL string
 
 	// JeffMatchMin is the minimum jeff score for a candidate to count as a
@@ -34,6 +34,22 @@ type Config struct {
 	JeffMatchMin      float64
 	MaxJeffCandidates int
 	JeffConcurrency   int
+
+	// Extraction stage (P3, ADR-2/7): ExtractLLMTopN gates the fenced wowa
+	// /extract LLM fallback to the top-N funnel-ranked candidates;
+	// ExtractMaxDetailFetches bounds product-page fetches per search;
+	// ExtractConcurrency bounds parallel candidate enrichment;
+	// ExtractFetchTimeoutSecs is the per-fetch wire timeout;
+	// ExtractCandidateTimeout bounds the whole per-candidate chain;
+	// ExtractCacheMaxItems bounds the L1 cache; ProdsearchRedisDB selects
+	// the dedicated Redis DB index for the L2 extraction cache.
+	ExtractLLMTopN          int
+	ExtractMaxDetailFetches int
+	ExtractConcurrency      int
+	ExtractFetchTimeoutSecs int
+	ExtractCandidateTimeout time.Duration
+	ExtractCacheMaxItems    int
+	ProdsearchRedisDB       int
 
 	// ToolTimeout is the default per-tool deadline; SearchToolTimeout and
 	// MatchToolTimeout override it for the product_search / product_match
@@ -56,7 +72,15 @@ func Load() Config {
 		JeffMatchMin:      env.Float("JEFF_MATCH_MIN", 0.55),
 		MaxJeffCandidates: env.Int("MAX_JEFF_CANDIDATES", 20),
 		JeffConcurrency:   env.Int("JEFF_CONCURRENCY", 3),
-		ToolTimeout:       env.Duration("TOOL_TIMEOUT", 90*time.Second),
+		// Extraction stage.
+		ExtractLLMTopN:          env.Int("EXTRACT_LLM_TOP_N", 10),
+		ExtractMaxDetailFetches: env.Int("EXTRACT_MAX_DETAIL_FETCHES", 15),
+		ExtractConcurrency:      env.Int("EXTRACT_CONCURRENCY", 4),
+		ExtractFetchTimeoutSecs: env.Int("EXTRACT_FETCH_TIMEOUT_SECS", 25),
+		ExtractCandidateTimeout: env.Duration("EXTRACT_CANDIDATE_TIMEOUT", 45*time.Second),
+		ExtractCacheMaxItems:    env.Int("EXTRACT_CACHE_ITEMS", 2000),
+		ProdsearchRedisDB:       env.Int("PRODSEARCH_REDIS_DB", 7),
+		ToolTimeout:             env.Duration("TOOL_TIMEOUT", 90*time.Second),
 		// product_search runs a wowa scrape (page loads are slow) and then
 		// jeff matching, so it gets the long tier.
 		SearchToolTimeout: env.Duration("TOOL_TIMEOUT_SEARCH", 3*time.Minute),
