@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/anatolykoptev/go-product-search/compare/v1.0.1...v1.0.2) (2026-09-25)
+
+
+### Fixed
+
+* **extract:** render tier waits domcontentloaded with doubled timeout ([#18](https://github.com/anatolykoptev/go-product-search/issues/18)) ([73efce1](https://github.com/anatolykoptev/go-product-search/commit/73efce104e13564fef654772f70afd1ca2adc49b))
+
 ## [1.0.1](https://github.com/anatolykoptev/go-product-search/compare/v1.0.0...v1.0.1) (2026-09-25)
 
 
