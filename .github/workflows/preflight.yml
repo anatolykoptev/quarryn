@@ -1,0 +1,97 @@
+name: preflight
+
+# Pre-merge lint+test+build gate. Private repo → self-hosted runner on
+# krolik (Oracle Cloud ARM box, ci.slice 150%/4G). One runner per repo,
+# box-wide serialization via ci-lock hooks (CI_LOCK_SLOTS=1). No DB
+# service container needed — tests are unit/integration only.
+#
+# Gate: make preflight (gofmt + go vet + golangci-lint + go build +
+# go test -race). dozor handles the Docker deploy separately
+# (release webhook → compose rebuild).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: [self-hosted, ARM64]
+    # Gate is ~3-4m on the 4-core box; 20m gives queue headroom (lock wait
+    # burns job time — ci-lock gives up after 45m by default).
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          # Track the latest PATCH of the 1.26 line, not `stable` and not a
+          # single exact version. Two constraints have to hold at once:
+          #
+          #   - stdlib CVEs are fixed in patch releases, so the fleet policy
+          #     of following patches stays (that is why this was `stable`);
+          #   - `stable` resolved to Go 1.27, which pulled
+          #     vendor/golang.org/x/net/http2/client_priority_go127.go
+          #     (build tag //go:build go1.27) into the build graph, and the
+          #     linter below — built with Go 1.26 — panicked type-checking
+          #     it (go-wowa issue #95).
+          #
+          # "1.26" satisfies both: it keeps the go1.27 build tag unsatisfied
+          # while still following the line's patches. Raise it in lockstep
+          # with the linter's Go, never ahead of it — that pairing is the
+          # whole bug.
+          go-version: '1.26'
+          # Required for the patch-following half to be true. Without it
+          # `check-latest` defaults to false, and on a self-hosted runner the
+          # Go tool cache persists between runs, so setup-go reuses whatever
+          # 1.26.x it installed once and no CVE patch ever arrives.
+          check-latest: true
+          # Self-hosted runner: module cache lives warm on the box (GOPATH/pkg),
+          # so actions/cache round-trip to GitHub is wasteful and slow (344MB
+          # vendor tarball upload timed out at 20m on the first run).
+          cache: false
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          # Pin the linter in the repo, not per-runner. Self-hosted runners
+          # share one $HOME — whatever anyone installs becomes everyone's
+          # linter and nothing records which version the gate ran.
+          # v2.12.2 is built with Go >= 1.26, compatible with the 1.26.x
+          # toolchain pin above (go-wowa issue #95).
+          install-only: true
+          version: v2.12.2
+          # setup-go above sets cache: false on purpose (warm module cache on
+          # the box). This action calls restoreCache() before its install-only
+          # early return, so without this it puts the GitHub cache round-trip
+          # straight back.
+          skip-cache: true
+
+      - name: make preflight
+        env:
+          # krolik has a go.work at ~/src — runner checks out to _work/,
+          # so the workspace file points at a nonexistent go.mod. Disable it.
+          # Quoted on purpose: bare `off` is a YAML BOOLEAN, so this
+          # reached Go as GOWORK=false -- a path to a file named
+          # "false", not the disable switch it reads as. The gate passed
+          # only because nothing above the runner checkout defines a
+          # go.work; add one and it would break mysteriously.
+          GOWORK: "off"
+          # The setup-go pin above is necessary but NOT sufficient. Go honours
+          # go.mod's `toolchain` directive by downloading that toolchain on
+          # demand, so bumping go.mod to `toolchain go1.27.x` would reproduce
+          # go-wowa#95 with the workflow untouched. `local` forbids the download
+          # and makes the gate run on exactly the Go setup-go installed — so a
+          # toolchain bump fails loudly here instead of silently re-breaking
+          # the linter.
+          GOTOOLCHAIN: local
+        run: make preflight

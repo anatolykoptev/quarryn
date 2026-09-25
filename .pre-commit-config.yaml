@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: golangci-lint-full
+        name: golangci-lint-full
+        language: system
+        # Uses the pinned canonical binary (~/.local/bin/golangci-lint v2.12.2).
+        # GOWORK=off is required: krolik has a go.work that makes golangci-lint
+        # typechecking fail with "directory prefix . does not contain modules
+        # listed in go.work" unless the workspace is explicitly disabled.
+        entry: env GOWORK=off /home/krolik/.local/bin/golangci-lint run
+        types: [go]
+        pass_filenames: false
