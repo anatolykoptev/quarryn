@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -150,14 +149,16 @@ func shopifyMatches(p shopifyProduct, needle string) bool {
 	if needle == "" {
 		return true
 	}
-	if strings.Contains(strings.ToLower(p.Title), needle) ||
-		strings.Contains(strings.ToLower(p.Vendor), needle) ||
-		strings.Contains(strings.ToLower(p.ProductType), needle) {
-		return true
+	// products.json has no server-side search — AND-match every query token
+	// against the combined searchable text ("JBL speaker" must hit
+	// "JBL Charge 6 ... Bluetooth Speaker", not the literal substring).
+	hay := strings.ToLower(p.Title + " " + p.Vendor + " " + p.ProductType + " " + strings.Join(p.Tags, " "))
+	for tok := range strings.FieldsSeq(needle) {
+		if !strings.Contains(hay, tok) {
+			return false
+		}
 	}
-	return slices.ContainsFunc(p.Tags, func(t string) bool {
-		return strings.Contains(strings.ToLower(t), needle)
-	})
+	return true
 }
 
 // shopifyResult maps one product to a Result: price = lowest in-stock

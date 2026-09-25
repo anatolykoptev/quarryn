@@ -156,3 +156,28 @@ func TestShopifyPartialFailure(t *testing.T) {
 		t.Fatalf("got %d results, want 2 from good shop", len(res))
 	}
 }
+
+func TestShopifyMultiTokenQuery(t *testing.T) {
+	srv, wc, _ := newShopifyWowa(t)
+	defer srv.Close()
+
+	a := NewShopify(wc, []string{"shop-one.example.com"})
+
+	// Tokens need not be adjacent: vendor "Campware" + title word "Mug".
+	res, err := a.Search(t.Context(), sources.Query{Text: "campware mug"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 1 || !strings.Contains(res[0].URL, "mug") {
+		t.Fatalf("campware mug got %v", res)
+	}
+
+	// AND semantics: no product carries both tokens.
+	res, err = a.Search(t.Context(), sources.Query{Text: "spork mug"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("spork mug should match nothing, got %v", res)
+	}
+}
