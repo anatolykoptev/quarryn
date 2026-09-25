@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/anatolykoptev/go-product-search/compare/v1.0.0...v1.0.1) (2026-09-25)
+
+
+### Fixed
+
+* **extract:** escalate CF-signature fetch errors to render tier ([#16](https://github.com/anatolykoptev/go-product-search/issues/16)) ([651beb2](https://github.com/anatolykoptev/go-product-search/commit/651beb2bc52f93d5c106676036295ca055f3951b))
+
 ## 1.0.0 (2026-09-25)
 
 
