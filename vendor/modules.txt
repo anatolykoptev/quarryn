@@ -20,6 +20,9 @@ github.com/anatolykoptev/go-kit/httputil
 github.com/anatolykoptev/go-kit/jeff
 github.com/anatolykoptev/go-kit/metrics
 github.com/anatolykoptev/go-kit/pacing
+github.com/anatolykoptev/go-kit/rerank
+github.com/anatolykoptev/go-kit/retry
+github.com/anatolykoptev/go-kit/score
 github.com/anatolykoptev/go-kit/wowa
 # github.com/anatolykoptev/go-mcpserver v0.18.0
 ## explicit; go 1.26

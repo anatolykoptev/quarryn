@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-mcpserver"
+	"github.com/anatolykoptev/go-product-search/internal/api"
 	"github.com/anatolykoptev/go-product-search/internal/auth"
 	"github.com/anatolykoptev/go-product-search/internal/config"
 	"github.com/anatolykoptev/go-product-search/internal/search"
@@ -57,14 +58,17 @@ func runMCPServer(cfg config.Config) error {
 	return mcpserver.Serve(&mcp.Implementation{
 		Name:    "go-product-search",
 		Version: version,
-	}, mcpConfig(cfg, []mcp.Middleware{hooks.Middleware()}, routes), func(_ *mcp.Server) {
-		// P2 sourcing stage: built at startup so misconfig (bad WOWA_URL,
-		// zero enabled adapters) surfaces in the log before the first tool
-		// call. P5 registers product_search / product_match tools on this
-		// server and hands them the searcher.
-		if _, err := search.New(cfg); err != nil {
-			slog.Error("sourcing stage init failed", slog.Any("error", err))
+	}, mcpConfig(cfg, []mcp.Middleware{hooks.Middleware()}, routes), func(srv *mcp.Server) {
+		// The searcher is built once here so the tool closures capture the
+		// retained pipeline — misconfig (bad WOWA_URL, zero enabled
+		// adapters) surfaces in the log before the first tool call. On init
+		// failure the tools still register and return the stored error:
+		// a loudly erroring tool beats one that silently never existed.
+		searcher, err := search.New(cfg)
+		if err != nil {
+			slog.Error("search pipeline init failed", slog.Any("error", err))
 		}
+		api.RegisterTools(srv, searcher, cfg, err)
 	})
 }
 

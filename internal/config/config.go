@@ -61,6 +61,15 @@ type Config struct {
 	ToolTimeout       time.Duration
 	SearchToolTimeout time.Duration
 	MatchToolTimeout  time.Duration
+
+	// Rank weights (P5): the relative shares the funnel consensus score,
+	// the ADR-17 deal signals and the jeff noul verdicts take in the fused
+	// score. They renormalize to sum 1 — only their ratios matter — and
+	// the jeff share drops to 0 automatically whenever a batch runs
+	// degraded (rank.normalize).
+	RankFunnelWeight float64
+	RankDealWeight   float64
+	RankJeffWeight   float64
 }
 
 // Load reads configuration from environment variables.
@@ -90,5 +99,11 @@ func Load() Config {
 		// jeff matching, so it gets the long tier.
 		SearchToolTimeout: env.Duration("TOOL_TIMEOUT_SEARCH", 3*time.Minute),
 		MatchToolTimeout:  env.Duration("TOOL_TIMEOUT_MATCH", time.Minute),
+		// Fusion weights — jeff dominates because the noul verdicts answer
+		// the user's actual criteria (mirrors the match stage's provisional
+		// 0.4/0.6 split, now sharing the deterministic half with deals).
+		RankFunnelWeight: env.Float("RANK_FUNNEL_WEIGHT", 0.3),
+		RankDealWeight:   env.Float("RANK_DEAL_WEIGHT", 0.2),
+		RankJeffWeight:   env.Float("RANK_JEFF_WEIGHT", 0.5),
 	}
 }

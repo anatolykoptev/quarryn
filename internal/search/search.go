@@ -12,6 +12,7 @@ import (
 
 	"github.com/anatolykoptev/go-engine/sources"
 	"github.com/anatolykoptev/go-kit/cache"
+	"github.com/anatolykoptev/go-kit/httputil"
 	"github.com/anatolykoptev/go-kit/wowa"
 	"github.com/anatolykoptev/go-product-search/internal/config"
 	"github.com/anatolykoptev/go-product-search/internal/extract"
@@ -35,6 +36,10 @@ type Output struct {
 	Sources       []pssources.SourceStatus `json:"sources"`
 	Degraded      bool                     `json:"degraded,omitempty"`
 	DegradeReason string                   `json:"degrade_reason,omitempty"`
+	// Questions is the planned subjective criterion set (id → text) the
+	// rank stage needs to build per-criterion explanations. Internal only —
+	// never serialized.
+	Questions []match.Question `json:"-"`
 }
 
 // New builds the pipeline: a go-wowa client (all third-party egress,
@@ -147,5 +152,30 @@ func (s *Searcher) SearchDetailed(ctx context.Context, query string, criteria []
 		Sources:       out.Sources,
 		Degraded:      mres.Degraded,
 		DegradeReason: mres.DegradeReason,
+		Questions:     plan.Questions,
+	}, nil
+}
+
+// MatchURL runs the per-candidate path for one caller-supplied product URL
+// — the product_match tool's backend. The funnel is bypassed (no adapter
+// fan-out), but the URL still passes the same SSRF screen the funnel
+// applies at candidate ingress (ADR-14: a caller-supplied URL is
+// third-party egress too) and then goes through the identical extraction +
+// match chain a search candidate would.
+func (s *Searcher) MatchURL(ctx context.Context, rawURL string, criteria []string) (Output, error) {
+	if err := httputil.CheckRawURL(ctx, rawURL); err != nil {
+		return Output{}, err
+	}
+	plan, err := match.PlanCriteria(criteria)
+	if err != nil {
+		return Output{}, err
+	}
+	c := pssources.Candidate{Source: "direct", URL: rawURL}
+	mres := s.matcher.Match(ctx, s.pipeline.Enrich(ctx, []pssources.Candidate{c}), plan)
+	return Output{
+		Candidates:    mres.Candidates,
+		Degraded:      mres.Degraded,
+		DegradeReason: mres.DegradeReason,
+		Questions:     plan.Questions,
 	}, nil
 }
