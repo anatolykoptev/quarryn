@@ -56,11 +56,11 @@ func TestSearchSurfacesAdapterFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = s.Search(t.Context(), "anything", 5)
+	_, err = s.Search(t.Context(), "anything", nil)
 	if err == nil {
 		t.Fatal("Search must error when every enabled adapter fails")
 	}
-	out, outErr := s.SearchDetailed(t.Context(), "anything", 5)
+	out, outErr := s.SearchDetailed(t.Context(), "anything", nil, 5)
 	if outErr == nil {
 		t.Fatal("SearchDetailed must error when every enabled adapter fails")
 	}
@@ -140,14 +140,14 @@ func TestSearchAppliesExtraction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	out, err := s.SearchDetailed(t.Context(), "monitor", 5)
+	out, err := s.SearchDetailed(t.Context(), "monitor", nil, 5)
 	if err != nil {
 		t.Fatalf("SearchDetailed: %v", err)
 	}
 	if len(out.Candidates) != 1 {
 		t.Fatalf("candidates = %+v", out.Candidates)
 	}
-	assertSchemaEnriched(t, out.Candidates[0])
+	assertSchemaEnriched(t, out.Candidates[0].EnrichedCandidate)
 	if !urlFetched(*fetchedURLs, "deal1") {
 		t.Fatalf("detail page never fetched: %v", *fetchedURLs)
 	}

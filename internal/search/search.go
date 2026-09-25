@@ -1,7 +1,7 @@
-// Package search wires the sourcing and extraction stages into the
-// service: it builds the wowa client, adapter registry and extraction
-// pipeline from config/env and exposes the funnel's entrypoint that P4
-// (jeff matching) and P5 (MCP tool surface) build on.
+// Package search wires the sourcing, extraction and jeff-match stages into
+// the service: it builds the wowa client, adapter registry, extraction
+// pipeline and matcher from config/env and exposes the funnel's entrypoint
+// that P5 (MCP tool surface) builds on.
 package search
 
 import (
@@ -15,38 +15,56 @@ import (
 	"github.com/anatolykoptev/go-kit/wowa"
 	"github.com/anatolykoptev/go-product-search/internal/config"
 	"github.com/anatolykoptev/go-product-search/internal/extract"
+	"github.com/anatolykoptev/go-product-search/internal/match"
 	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
 )
 
 // Searcher is the product-search entrypoint: query → sourced candidates →
-// extracted products. Construct via New.
+// extracted products → jeff-judged matches. Construct via New.
 type Searcher struct {
 	funnel   *pssources.Funnel
 	pipeline *extract.Pipeline
+	matcher  *match.Matcher
 	registry map[string]pssources.Adapter
 }
 
-// Output is the full search result: extraction-enriched candidates plus
-// the per-source outcome report for observability.
+// Output is the full search result: jeff-judged candidates plus the
+// per-source outcome report and the degrade surface for observability.
 type Output struct {
-	Candidates []extract.EnrichedCandidate `json:"candidates"`
-	Sources    []pssources.SourceStatus    `json:"sources"`
+	Candidates    []match.JudgedCandidate  `json:"candidates"`
+	Sources       []pssources.SourceStatus `json:"sources"`
+	Degraded      bool                     `json:"degraded,omitempty"`
+	DegradeReason string                   `json:"degrade_reason,omitempty"`
 }
 
 // New builds the pipeline: a go-wowa client (all third-party egress,
 // ADR-1), the env-resolved adapter registry (ADR-13/16), the sourcing
-// funnel (ADR-8) and the extraction stage (ADR-2/7/14). Adapter
-// credentials resolve from env inside RegistryConfigFromEnv; missing creds
-// leave adapters dark, not fatal.
+// funnel (ADR-8), the extraction stage (ADR-2/7/14) and the jeff match
+// stage (ADR-3/4/5/11/12). Adapter credentials resolve from env inside
+// RegistryConfigFromEnv; missing creds leave adapters dark, not fatal. An
+// absent JEFF_URL builds a degrade-mode matcher — deterministic ranking
+// only, flagged on every result.
 func New(cfg config.Config) (*Searcher, error) {
 	wc, err := wowa.NewClient(cfg.WowaURL)
 	if err != nil {
 		return nil, fmt.Errorf("search: wowa client: %w", err)
 	}
+	matcher, err := match.New(match.Config{
+		URL:           cfg.JeffURL,
+		Token:         cfg.JeffToken,
+		Min:           cfg.JeffMatchMin,
+		MaxCandidates: cfg.MaxJeffCandidates,
+		Concurrency:   cfg.JeffConcurrency,
+		Timeout:       cfg.JeffTimeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search: jeff matcher: %w", err)
+	}
 	registry := pssources.NewRegistry(pssources.RegistryConfigFromEnv(wc, nil))
 	s := &Searcher{
 		funnel:   pssources.NewFunnel(registry),
 		pipeline: newPipeline(cfg, wc, registry),
+		matcher:  matcher,
 		registry: registry,
 	}
 	slog.Info("search stage ready", slog.Any("adapters", s.AdapterStatus()))
@@ -100,28 +118,34 @@ func (s *Searcher) AdapterStatus() map[string]bool {
 	return out
 }
 
-// Search runs funnel + extraction for query and returns enriched
-// candidates. limit bounds the per-adapter upstream page size; the funnel
-// still caps the merged pool at its own limit (50, ADR-8) and extraction
-// caps detail fetches/LLM calls at its own budgets.
-func (s *Searcher) Search(ctx context.Context, query string, limit int) ([]extract.EnrichedCandidate, error) {
-	out, err := s.SearchDetailed(ctx, query, limit)
-	if err != nil {
-		return nil, err
-	}
-	return out.Candidates, nil
+// Search runs the full pipeline for query under criteria and returns
+// judged candidates. criteria mixes deterministic constraints
+// ("price_max:500", "brand:sony", "not_keyword:refurbished",
+// "availability:in_stock", "currency:usd" — see match.PlanCriteria for
+// the full vocabulary) with free-text subjective criteria answered by
+// jeff nouls. Adapters use their default page sizes.
+func (s *Searcher) Search(ctx context.Context, query string, criteria []string) (Output, error) {
+	return s.SearchDetailed(ctx, query, criteria, 0)
 }
 
-// SearchDetailed additionally returns the per-source outcome report — the
-// funnel's observability surface.
-func (s *Searcher) SearchDetailed(ctx context.Context, query string, limit int) (Output, error) {
+// SearchDetailed takes an explicit per-adapter upstream page-size limit;
+// the funnel still caps the merged pool at its own limit (50, ADR-8) and
+// extraction caps detail fetches/LLM calls at its own budgets.
+func (s *Searcher) SearchDetailed(ctx context.Context, query string, criteria []string, limit int) (Output, error) {
+	plan, err := match.PlanCriteria(criteria)
+	if err != nil {
+		return Output{}, err
+	}
 	q := sources.Query{Text: query, Limit: limit}
 	out, err := s.funnel.Search(ctx, q)
 	if err != nil {
 		return Output{Sources: out.Sources}, err
 	}
+	mres := s.matcher.Match(ctx, s.pipeline.Enrich(ctx, out.Candidates), plan)
 	return Output{
-		Candidates: s.pipeline.Enrich(ctx, out.Candidates),
-		Sources:    out.Sources,
+		Candidates:    mres.Candidates,
+		Sources:       out.Sources,
+		Degraded:      mres.Degraded,
+		DegradeReason: mres.DegradeReason,
 	}, nil
 }

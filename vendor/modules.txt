@@ -17,6 +17,7 @@ github.com/anatolykoptev/go-kit/breaker
 github.com/anatolykoptev/go-kit/cache
 github.com/anatolykoptev/go-kit/env
 github.com/anatolykoptev/go-kit/httputil
+github.com/anatolykoptev/go-kit/jeff
 github.com/anatolykoptev/go-kit/metrics
 github.com/anatolykoptev/go-kit/pacing
 github.com/anatolykoptev/go-kit/wowa

@@ -30,10 +30,12 @@ type Config struct {
 
 	// JeffMatchMin is the minimum jeff score for a candidate to count as a
 	// match. MaxJeffCandidates caps how many scraped candidates go to jeff;
-	// JeffConcurrency bounds in-flight jeff calls.
+	// JeffConcurrency bounds in-flight jeff calls; JeffTimeout is the
+	// per-call deadline on each packed Ask (ADR-12).
 	JeffMatchMin      float64
 	MaxJeffCandidates int
 	JeffConcurrency   int
+	JeffTimeout       time.Duration
 
 	// Extraction stage (P3, ADR-2/7): ExtractLLMTopN gates the fenced wowa
 	// /extract LLM fallback to the top-N funnel-ranked candidates;
@@ -72,6 +74,7 @@ func Load() Config {
 		JeffMatchMin:      env.Float("JEFF_MATCH_MIN", 0.55),
 		MaxJeffCandidates: env.Int("MAX_JEFF_CANDIDATES", 20),
 		JeffConcurrency:   env.Int("JEFF_CONCURRENCY", 3),
+		JeffTimeout:       env.Duration("JEFF_TIMEOUT", 10*time.Second),
 		// Extraction stage.
 		ExtractLLMTopN:          env.Int("EXTRACT_LLM_TOP_N", 10),
 		ExtractMaxDetailFetches: env.Int("EXTRACT_MAX_DETAIL_FETCHES", 15),
