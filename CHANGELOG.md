@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/anatolykoptev/go-product-search/compare/v1.0.4...v1.1.0) (2026-09-25)
+
+
+### Added
+
+* **extract:** interact solve tier for CF-walled detail pages ([#25](https://github.com/anatolykoptev/go-product-search/issues/25)) ([4a51c54](https://github.com/anatolykoptev/go-product-search/commit/4a51c543ab8e3d26ae7f171ee1cd74fed5b7f498))
+
 ## [1.0.4](https://github.com/anatolykoptev/go-product-search/compare/v1.0.3...v1.0.4) (2026-09-25)
 
 
