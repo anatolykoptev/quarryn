@@ -46,6 +46,7 @@ func handleProductSearch(ctx context.Context, d deps, in productSearchInput) (*m
 
 	ranked := rank.Rank(out.Candidates, out.Questions, out.Degraded, d.weights, d.passMin)
 	resp := searchOutput{
+		RequestID:     out.RequestID,
 		Results:       make([]productResult, 0, min(limit, len(ranked))),
 		Sources:       out.Sources,
 		Degraded:      out.Degraded,

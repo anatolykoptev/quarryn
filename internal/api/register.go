@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/anatolykoptev/go-product-search/internal/config"
+	"github.com/anatolykoptev/go-product-search/internal/probe"
 	"github.com/anatolykoptev/go-product-search/internal/rank"
 	"github.com/anatolykoptev/go-product-search/internal/search"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -15,6 +16,7 @@ const (
 	toolProductSearch   = "product_search"
 	toolProductMatch    = "product_match"
 	toolProductFeedback = "product_feedback"
+	toolProductProbe    = "product_probe"
 )
 
 // Result-capping defaults for product_search. The funnel already bounds
@@ -26,13 +28,15 @@ const (
 
 // deps bundles what the tool handlers close over: the retained searcher,
 // the fusion weights/pass threshold resolved once from config, the
-// feedback outcome sink (ADR-10), and the pipeline init error (non-nil →
-// handlers report it instead of the tool silently missing).
+// feedback outcome sink (ADR-10), the acceptance-probe runner (ADR-6),
+// and the pipeline init error (non-nil → handlers report it instead of
+// the tool silently missing).
 type deps struct {
 	searcher *search.Searcher
 	weights  rank.Weights
 	passMin  float64
 	feedback *FeedbackStore
+	prober   *probe.Runner
 	initErr  error
 }
 
@@ -46,7 +50,7 @@ type deps struct {
 // RESTBridge auto-exposes the tools under /api/tools/*; the feedback tool
 // additionally answers on POST /api/v1/feedback (registered in main.go,
 // same store).
-func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, feedback *FeedbackStore, initErr error) {
+func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, feedback *FeedbackStore, prober *probe.Runner, initErr error) {
 	d := deps{
 		searcher: searcher,
 		weights: rank.Weights{
@@ -56,11 +60,13 @@ func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config
 		},
 		passMin:  cfg.JeffMatchMin,
 		feedback: feedback,
+		prober:   prober,
 		initErr:  initErr,
 	}
 	registerProductSearch(srv, d)
 	registerProductMatch(srv, d)
 	registerProductFeedback(srv, d)
+	registerProductProbe(srv, d)
 }
 
 // unavailable reports the init error every tool handler surfaces when the

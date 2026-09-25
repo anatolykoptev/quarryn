@@ -134,12 +134,12 @@ type Result struct {
 // jeff Ask per surviving candidate under a concurrency bound. Construct
 // via New; safe for concurrent Match calls.
 type Matcher struct {
-	jeff        asker
+	jeff        Asker
 	min         float64       // JeffMatchMin
 	maxCands    int           // MaxJeffCandidates
 	conc        int           // JeffConcurrency
 	callTimeout time.Duration // per-call deadline (JEFF_TIMEOUT)
-	reqSeq      atomic.Uint64 // jeff_gate request_id source
+	reqSeq      atomic.Uint64 // jeff_gate request_id fallback counter
 }
 
 // Match applies the plan to candidates: deterministic prefilter → jeff

@@ -47,8 +47,11 @@ type productResult struct {
 	UnjudgedReason  string                  `json:"unjudged_reason,omitempty"`
 }
 
-// searchOutput is the product_search response.
+// searchOutput is the product_search response. RequestID is the ADR-6
+// calibration id — the uuid on every jeff_gate log event of this call and
+// the key callers pass to product_feedback so the outcome joins offline.
 type searchOutput struct {
+	RequestID     string                   `json:"request_id"`
 	Results       []productResult          `json:"results"`
 	Sources       []pssources.SourceStatus `json:"sources,omitempty"`
 	Degraded      bool                     `json:"degraded,omitempty"`
@@ -56,7 +59,9 @@ type searchOutput struct {
 }
 
 // matchOutput is the product_match response — a single judged product.
+// RequestID serves the same ADR-6 calibration join as product_search.
 type matchOutput struct {
+	RequestID     string        `json:"request_id"`
 	Result        productResult `json:"result"`
 	Degraded      bool          `json:"degraded,omitempty"`
 	DegradeReason string        `json:"degrade_reason,omitempty"`

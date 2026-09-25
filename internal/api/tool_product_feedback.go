@@ -16,7 +16,7 @@ const productFeedbackDesc = "Record the outcome of a product_search/product_matc
 // productFeedbackInput is the product_feedback tool argument shape — and
 // the POST /api/v1/feedback JSON body (shared decode).
 type productFeedbackInput struct {
-	RequestID string `json:"request_id"          jsonschema:"Correlation id of the search being rated (the request_id on the jeff_gate log events for that call)"`
+	RequestID string `json:"request_id"          jsonschema:"Correlation id of the search being rated — the request_id field returned in the product_search/product_match response, also stamped on every jeff_gate log event of that call"`
 	PickedURL string `json:"picked_url"          jsonschema:"Listing URL the user picked or visited"`
 	Verdict   string `json:"verdict,omitempty"   jsonschema:"Optional outcome verdict (e.g. bought, wrong_price, out_of_stock, bad_match)"`
 }

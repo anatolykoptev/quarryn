@@ -44,6 +44,7 @@ func handleProductMatch(ctx context.Context, d deps, in productMatchInput) (*mcp
 		return errResult("no result for " + in.ProductURL), nil
 	}
 	return jsonResult(matchOutput{
+		RequestID:     out.RequestID,
 		Result:        project(ranked[0]),
 		Degraded:      out.Degraded,
 		DegradeReason: out.DegradeReason,

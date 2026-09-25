@@ -15,6 +15,7 @@ import (
 	"github.com/anatolykoptev/go-product-search/internal/api"
 	"github.com/anatolykoptev/go-product-search/internal/auth"
 	"github.com/anatolykoptev/go-product-search/internal/config"
+	"github.com/anatolykoptev/go-product-search/internal/probe"
 	"github.com/anatolykoptev/go-product-search/internal/search"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -75,8 +76,19 @@ func runMCPServer(cfg config.Config) error {
 		if err != nil {
 			slog.Error("search pipeline init failed", slog.Any("error", err))
 		}
-		api.RegisterTools(srv, searcher, cfg, feedback, err)
+		api.RegisterTools(srv, searcher, cfg, feedback, probeRunner(searcher, cfg), err)
 	})
+}
+
+// probeRunner picks the acceptance-probe backend: the pipeline's own
+// clients when it built, standalone clients when it did not — probes are
+// most useful exactly when the pipeline is down, so a wowa URL parse
+// failure must not silence them.
+func probeRunner(s *search.Searcher, cfg config.Config) *probe.Runner {
+	if s != nil {
+		return s.Prober()
+	}
+	return probe.NewStandalone(cfg)
 }
 
 // toolTimeouts holds per-tool deadline overrides for the tools the next arc

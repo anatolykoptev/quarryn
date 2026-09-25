@@ -185,7 +185,7 @@ func (noAnswerAsker) Ask(context.Context, jeff.Request) (*jeff.Response, error) 
 	return &jeff.Response{Answers: map[string]jeff.Answer{}}, nil
 }
 
-func testMatcher(a asker) *Matcher {
+func testMatcher(a Asker) *Matcher {
 	return &Matcher{jeff: a, min: 0.55, maxCands: 20, conc: 3, callTimeout: 10 * time.Second}
 }
 

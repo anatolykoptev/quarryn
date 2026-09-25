@@ -43,10 +43,11 @@ type Config struct {
 	Timeout time.Duration
 }
 
-// asker is the narrow slice of *jeff.Client this stage uses — kept behind
-// an interface so tests can inject failures without a live service. jeff
-// wire types stay inside package match (ADR-11).
-type asker interface {
+// Asker is the narrow slice of *jeff.Client this stage uses — kept behind
+// an interface so tests and the injection probe can substitute the Ask
+// boundary without a live service. jeff wire types stay inside package
+// match (ADR-11).
+type Asker interface {
 	Ask(ctx context.Context, req jeff.Request) (*jeff.Response, error)
 }
 
@@ -55,6 +56,26 @@ type asker interface {
 // warns loudly at startup (the go-wowa newJeffGate pattern): the client
 // still builds and per-call 401s degrade instead of silently failing.
 func New(cfg Config) (*Matcher, error) {
+	m := newMatcher(cfg)
+	if cfg.URL == "" {
+		slog.Warn("match: no JEFF_URL — matcher runs in degrade mode, deterministic ranking only")
+		return m, nil
+	}
+	if cfg.Token == "" {
+		slog.Warn("match: jeff configured without JEFF_TOKEN; every Ask will degrade on 401")
+	}
+	jc, err := jeff.NewClient(cfg.URL, jeff.WithToken(cfg.Token), jeff.WithTimeout(m.callTimeout))
+	if err != nil {
+		return nil, err
+	}
+	m.jeff = jc
+	return m, nil
+}
+
+// newMatcher applies the Config defaults and returns a Matcher without an
+// Ask backend — the shared constructor New (real client) and NewWithAsker
+// (injected boundary) build on.
+func newMatcher(cfg Config) *Matcher {
 	m := &Matcher{
 		min:         cfg.Min,
 		maxCands:    cfg.MaxCandidates,
@@ -73,19 +94,7 @@ func New(cfg Config) (*Matcher, error) {
 	if m.callTimeout <= 0 {
 		m.callTimeout = defaultJeffTimeout
 	}
-	if cfg.URL == "" {
-		slog.Warn("match: no JEFF_URL — matcher runs in degrade mode, deterministic ranking only")
-		return m, nil
-	}
-	if cfg.Token == "" {
-		slog.Warn("match: jeff configured without JEFF_TOKEN; every Ask will degrade on 401")
-	}
-	jc, err := jeff.NewClient(cfg.URL, jeff.WithToken(cfg.Token), jeff.WithTimeout(m.callTimeout))
-	if err != nil {
-		return nil, err
-	}
-	m.jeff = jc
-	return m, nil
+	return m
 }
 
 // callDeadline applies the per-call bound (min of the caller ctx deadline
@@ -106,7 +115,7 @@ func (m *Matcher) askAll(ctx context.Context, res *Result, eligible []int, qs []
 
 	sem := make(chan struct{}, m.conc)
 	var wg sync.WaitGroup
-	reqID := m.reqSeq.Add(1)
+	reqID := m.requestID(ctx)
 	for _, i := range eligible {
 		select {
 		case sem <- struct{}{}:
@@ -128,7 +137,7 @@ func (m *Matcher) askAll(ctx context.Context, res *Result, eligible []int, qs []
 // writes back either Verdicts+fused score or an unjudged marking. The
 // jeff_gate log event (ADR-6) pairs each call with its verdicts and
 // latency for later calibration joins.
-func (m *Matcher) judgeOne(ctx context.Context, res *Result, idx int, questions map[string]jeff.Question, maxScore float64, reqID uint64) {
+func (m *Matcher) judgeOne(ctx context.Context, res *Result, idx int, questions map[string]jeff.Question, maxScore float64, reqID string) {
 	jc := &res.Candidates[idx]
 	state := NewCandidateState(jc.ProductPublic())
 

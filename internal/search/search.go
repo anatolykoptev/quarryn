@@ -17,6 +17,7 @@ import (
 	"github.com/anatolykoptev/go-product-search/internal/config"
 	"github.com/anatolykoptev/go-product-search/internal/extract"
 	"github.com/anatolykoptev/go-product-search/internal/match"
+	"github.com/anatolykoptev/go-product-search/internal/probe"
 	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
 )
 
@@ -26,6 +27,7 @@ type Searcher struct {
 	funnel   *pssources.Funnel
 	pipeline *extract.Pipeline
 	matcher  *match.Matcher
+	prober   *probe.Runner
 	registry map[string]pssources.Adapter
 	// maxPages caps wowa fetch/render calls per request
 	// (MAX_PAGES_PER_SEARCH) — attached to the request ctx as a
@@ -37,6 +39,10 @@ type Searcher struct {
 // Output is the full search result: jeff-judged candidates plus the
 // per-source outcome report and the degrade surface for observability.
 type Output struct {
+	// RequestID is the ADR-6 calibration id minted for this call — the
+	// uuid on every jeff_gate log event of the search and the key the
+	// product_feedback outcome record joins on.
+	RequestID     string                   `json:"request_id"`
 	Candidates    []match.JudgedCandidate  `json:"candidates"`
 	Sources       []pssources.SourceStatus `json:"sources"`
 	Degraded      bool                     `json:"degraded,omitempty"`
@@ -82,6 +88,7 @@ func New(cfg config.Config) (*Searcher, error) {
 		funnel:   pssources.NewFunnel(registry),
 		pipeline: newPipeline(cfg, detailGate, wc, registry),
 		matcher:  matcher,
+		prober:   probe.New(wc, matcher, cfg.JeffMatchMin),
 		registry: registry,
 		maxPages: cfg.MaxPagesPerSearch,
 	}
@@ -130,6 +137,12 @@ func newExtractCache(cfg config.Config) *cache.Cache {
 	})
 }
 
+// Prober returns the acceptance-probe runner sharing the pipeline's live
+// wowa/jeff clients — the product_probe tool's backend (ADR-6).
+func (s *Searcher) Prober() *probe.Runner {
+	return s.prober
+}
+
 // AdapterStatus reports each registered adapter's name → enabled state.
 // Surfaced at startup so a misconfigured deployment is visible in logs
 // before the first tool call.
@@ -159,6 +172,10 @@ func (s *Searcher) SearchDetailed(ctx context.Context, query string, criteria []
 	if err != nil {
 		return Output{}, err
 	}
+	// ADR-6 calibration id: one uuid per judged search, shared by the
+	// response payload, every jeff_gate log event and the feedback record.
+	reqID := match.NewRequestID()
+	ctx = match.WithRequestID(ctx, reqID)
 	// The P6 page budget rides the request ctx: every wowa fetch/render —
 	// adapter SERP calls and extraction detail fetches alike — counts
 	// against MAX_PAGES_PER_SEARCH. On cap the gate stops detail fetches
@@ -169,10 +186,11 @@ func (s *Searcher) SearchDetailed(ctx context.Context, query string, criteria []
 	q := sources.Query{Text: query, Limit: limit}
 	out, err := s.funnel.Search(ctx, q)
 	if err != nil {
-		return Output{Sources: out.Sources}, err
+		return Output{RequestID: reqID, Sources: out.Sources}, err
 	}
 	mres := s.matcher.Match(ctx, s.pipeline.Enrich(ctx, out.Candidates), plan)
 	return Output{
+		RequestID:     reqID,
 		Candidates:    mres.Candidates,
 		Sources:       out.Sources,
 		Degraded:      mres.Degraded,
@@ -195,6 +213,10 @@ func (s *Searcher) MatchURL(ctx context.Context, rawURL string, criteria []strin
 	if err != nil {
 		return Output{}, err
 	}
+	// Same calibration id as a search — the match stage's jeff_gate events
+	// join the product_match response on it.
+	reqID := match.NewRequestID()
+	ctx = match.WithRequestID(ctx, reqID)
 	// Same page budget as a search — one URL fits easily, but the cap keeps
 	// the fetch/render path honest and identical to the funnel path.
 	if s.maxPages > 0 {
@@ -203,6 +225,7 @@ func (s *Searcher) MatchURL(ctx context.Context, rawURL string, criteria []strin
 	c := pssources.Candidate{Source: "direct", URL: rawURL}
 	mres := s.matcher.Match(ctx, s.pipeline.Enrich(ctx, []pssources.Candidate{c}), plan)
 	return Output{
+		RequestID:     reqID,
 		Candidates:    mres.Candidates,
 		Degraded:      mres.Degraded,
 		DegradeReason: mres.DegradeReason,
