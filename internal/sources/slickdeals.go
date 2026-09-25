@@ -32,6 +32,12 @@ var (
 	slickdealsThumbsFirstRe = regexp.MustCompile(`(?i)(\d+)\s*thumbs?`)
 	// Merchant: "Merchant: Amazon" up to markup/punctuation boundary.
 	slickdealsMerchantRe = regexp.MustCompile(`(?i)merchant\s*:\s*([^<,;\n]+)`)
+	// Post-discount deal price: "= $95.96" / "= *$95.96*" after a coupon or
+	// percent-off clause — beats the list price that precedes it.
+	slickdealsFinalPriceRe = regexp.MustCompile(`=\s*\*?\s*\$\s*([0-9][0-9,]*(?:\.[0-9]{2})?)`)
+	// Merchant BBCode: "Amazon [amazon.com] has ..." — the feed truncates
+	// outbound hrefs but keeps the bracketed domain.
+	slickdealsMerchantBBRe = regexp.MustCompile(`\[([a-z0-9][a-z0-9.-]*\.(?:com|net|org|io|co|us))\]`)
 )
 
 // slickdealsAdapter reads the slickdeals frontpage/search RSS feed. Third-
@@ -111,14 +117,18 @@ func (a *slickdealsAdapter) Search(ctx context.Context, q sources.Query) ([]sour
 	out := make([]sources.Result, 0, len(doc.Channel.Items))
 	for _, it := range doc.Channel.Items {
 		md := map[string]string{}
-		if m := slickdealsPriceRe.FindStringSubmatch(it.Description); len(m) == 2 {
-			md[MetaPrice] = strings.ReplaceAll(m[1], ",", "")
+		if m := dealPrice(it.Title, it.Description); m != "" {
+			md[MetaPrice] = strings.ReplaceAll(m, ",", "")
+			// Slickdeals is a US-only deals site — card prices are USD.
+			md[MetaCurrency] = "USD"
 		}
 		if thumbs, ok := slickdealsThumbs(it.Description); ok {
 			md[MetaThumbs] = strconv.Itoa(thumbs)
 		}
 		if m := slickdealsMerchantRe.FindStringSubmatch(it.Description); len(m) == 2 {
 			md[MetaMerchant] = strings.TrimSpace(m[1])
+		} else if m := slickdealsMerchantBBRe.FindStringSubmatch(it.Description); len(m) == 2 {
+			md[MetaMerchant] = m[1]
 		}
 		md[MetaAvailability] = AvailabilityInStock // frontpage deals are live
 		out = append(out, sources.Result{
@@ -129,6 +139,23 @@ func (a *slickdealsAdapter) Search(ctx context.Context, q sources.Query) ([]sour
 		})
 	}
 	return out, nil
+}
+
+// dealPrice picks the price a buyer would pay: the post-discount "= $X"
+// amount in the description when present, else the first $-amount in the
+// title (slickdeals titles conventionally carry the deal price), else the
+// first $-amount anywhere in the description.
+func dealPrice(title, desc string) string {
+	if m := slickdealsFinalPriceRe.FindStringSubmatch(desc); len(m) == 2 {
+		return m[1]
+	}
+	if m := slickdealsPriceRe.FindStringSubmatch(title); len(m) == 2 {
+		return m[1]
+	}
+	if m := slickdealsPriceRe.FindStringSubmatch(desc); len(m) == 2 {
+		return m[1]
+	}
+	return ""
 }
 
 // slickdealsThumbs extracts the thumbs-up count from an item description,

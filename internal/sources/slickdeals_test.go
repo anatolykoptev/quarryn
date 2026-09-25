@@ -30,6 +30,18 @@ const slickdealsRSSFixture = `<?xml version="1.0" encoding="UTF-8"?>
       <description><![CDATA[Best Buy has 75" Hisense U8 for $999.99. 38 thumbs up.]]></description>
       <pubDate>Tue, 23 Sep 2026 09:30:00 -0700</pubDate>
     </item>
+    <item>
+      <title>Woot! App: $95.96 | JBL Charge 6 Waterproof Portable Bluetooth Speaker at Woot!</title>
+      <link>https://slickdeals.net/f/20060145-jbl-charge-6</link>
+      <description><![CDATA[*Woot!* [woot.com] has *JBL Charge 6* for $119.95 - *extra 20%* off = *$95.96*. 67 thumbs up.]]></description>
+      <pubDate>Tue, 23 Sep 2026 09:00:00 -0700</pubDate>
+    </item>
+    <item>
+      <title>Desc-only deal widget</title>
+      <link>https://slickdeals.net/f/9-desc-only</link>
+      <description><![CDATA[Coupon widget for $12.34.]]></description>
+      <pubDate>Tue, 23 Sep 2026 08:00:00 -0700</pubDate>
+    </item>
   </channel>
 </rss>`
 
@@ -88,8 +100,8 @@ func TestSlickdealsParsesRSS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(res) != 2 {
-		t.Fatalf("got %d results, want 2", len(res))
+	if len(res) != 4 {
+		t.Fatalf("got %d results, want 4", len(res))
 	}
 	if len(gotURLs) != 1 || !strings.Contains(gotURLs[0], "q=headphones") || !strings.Contains(gotURLs[0], "rss=1") {
 		t.Fatalf("feed URL = %v", gotURLs)
@@ -99,8 +111,11 @@ func TestSlickdealsParsesRSS(t *testing.T) {
 	if first.URL != "https://slickdeals.net/f/18273645-sony-wh-1000xm5" {
 		t.Errorf("url = %q", first.URL)
 	}
-	if got := first.Metadata[MetaPrice]; got != "278.00" {
+	if got := first.Metadata[MetaPrice]; got != "278" {
 		t.Errorf("price = %q", got)
+	}
+	if got := first.Metadata[MetaCurrency]; got != "USD" {
+		t.Errorf("currency = %q", got)
 	}
 	if got := first.Metadata[MetaThumbs]; got != "142" {
 		t.Errorf("thumbs = %q", got)
@@ -114,6 +129,39 @@ func TestSlickdealsParsesRSS(t *testing.T) {
 	}
 	if got := res[1].Metadata[MetaPrice]; got != "999.99" {
 		t.Errorf("res[1] price = %q", got)
+	}
+}
+
+// TestSlickdealsLiveShapeCard covers the real feed shape: BBCode
+// "[woot.com]" merchant instead of "Merchant: X", post-discount
+// "= *$95.96*" pricing, and description-only prices.
+func TestSlickdealsLiveShapeCard(t *testing.T) {
+	srv := newWowaFakeServer(t, map[string]string{
+		"slickdeals.net": slickdealsRSSFixture,
+	}, nil)
+	defer srv.Close()
+	wc, err := wowa.NewClient(srv.URL)
+	if err != nil {
+		t.Fatalf("wowa client: %v", err)
+	}
+	res, err := NewSlickdeals(wc, "").Search(t.Context(), sources.Query{Text: "x"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 4 {
+		t.Fatalf("got %d results, want 4", len(res))
+	}
+	if got := res[2].Metadata[MetaPrice]; got != "95.96" {
+		t.Errorf("res[2] price = %q", got)
+	}
+	if got := res[2].Metadata[MetaCurrency]; got != "USD" {
+		t.Errorf("res[2] currency = %q", got)
+	}
+	if got := res[2].Metadata[MetaMerchant]; got != "woot.com" {
+		t.Errorf("res[2] merchant = %q", got)
+	}
+	if got := res[3].Metadata[MetaPrice]; got != "12.34" {
+		t.Errorf("res[3] price = %q", got)
 	}
 }
 
