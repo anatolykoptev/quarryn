@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/anatolykoptev/go-product-search/compare/v1.0.2...v1.0.3) (2026-09-25)
+
+
+### Fixed
+
+* **extract:** handle schema.org ProductGroup variant pages ([#21](https://github.com/anatolykoptev/go-product-search/issues/21)) ([2c11b6a](https://github.com/anatolykoptev/go-product-search/commit/2c11b6ac6bc07cdaa15dd00b36a7a12011da3d13))
+
 ## [1.0.2](https://github.com/anatolykoptev/go-product-search/compare/v1.0.1...v1.0.2) (2026-09-25)
 
 
