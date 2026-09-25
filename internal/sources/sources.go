@@ -42,6 +42,12 @@ const (
 type SourceSpec struct {
 	// FetchClass declares how the adapter fetches upstream data.
 	FetchClass FetchClass
+	// ResolveOutbound marks deal-aggregator sources whose listing URL is a
+	// thread/discussion page rather than a buyable product page (slickdeals
+	// /f/ threads). SERP-complete cards from such sources still take the
+	// interact tier (top-N) to resolve the outbound merchant link and
+	// verify against the real store page.
+	ResolveOutbound bool
 }
 
 // Adapter is a marketplace source connector: a go-engine sources.Source

@@ -447,3 +447,38 @@ func TestEnrichInteractFollowsBuyLink(t *testing.T) {
 		t.Fatalf("resolved buy url missing: %+v", out[0].Product)
 	}
 }
+
+// TestEnrichResolvesOutboundCard: a SERP-complete deal card on a
+// ResolveOutbound source never fetches the thread (card data suffices)
+// but still gets an interact session to resolve the buyable merchant
+// link — the outbound hop merges verified merchant data and sets BuyURL.
+func TestEnrichResolvesOutboundCard(t *testing.T) {
+	f := &stubFetcher{resp: &wowa.FetchResponse{Status: 200, Body: "<html/>"}}
+	i := &stubInteracter{
+		dom:    `<head><title>thread</title></head>`,
+		click:  "https://slickdeals.net/click?sdtid=42",
+		landed: "https://electronics.woot.com/offers/jbl-charge-6",
+		dom2:   `<head><script type="application/ld+json">{"@type":"Product","name":"JBL Charge 6","offers":{"@type":"Offer","price":"95.96","priceCurrency":"USD","availability":"https://schema.org/InStock"}}</script></head>`,
+	}
+	cfg := testConfig()
+	cfg.Interact = i
+	cfg.ResolveOutbound = map[string]bool{"slickdeals": true}
+	p := New(f, &stubExtractor{}, cfg)
+
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		{Source: "slickdeals", Title: "JBL Charge 6 @ Woot", URL: "https://slickdeals.net/f/42-x",
+			Price: f64(95.96), Currency: "USD"},
+	})
+	if f.calls.Load() != 0 {
+		t.Fatalf("card-complete candidate must not fetch detail: fetches=%d", f.calls.Load())
+	}
+	if i.calls.Load() != 2 {
+		t.Fatalf("interact calls = %d, want 2 (thread + outbound hop)", i.calls.Load())
+	}
+	if out[0].ExtractionFailed {
+		t.Fatalf("card should stay valid: %+v", out[0])
+	}
+	if out[0].Product.BuyURL != "https://electronics.woot.com/offers/jbl-charge-6" {
+		t.Fatalf("buy url not resolved: %+v", out[0].Product)
+	}
+}
