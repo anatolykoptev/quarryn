@@ -37,19 +37,24 @@ const (
 // strongest path that contributed, and Raw carries provenance (the parsed
 // schema.org item or the LLM payload) for auditability.
 type Product struct {
-	Name         string          `json:"name"`
-	URL          string          `json:"url"`
-	Price        *float64        `json:"price,omitempty"`
-	Currency     string          `json:"currency,omitempty"` // ISO 4217
-	Availability string          `json:"availability,omitempty"`
-	Condition    string          `json:"condition,omitempty"`
-	SellerName   string          `json:"seller_name,omitempty"`
-	Rating       *float64        `json:"rating,omitempty"` // schema.org 0-5 convention
-	ImageURL     string          `json:"image_url,omitempty"`
-	Description  string          `json:"description,omitempty"`
-	Source       string          `json:"source"` // product-page domain, www stripped
-	Method       string          `json:"method"`
-	Raw          json.RawMessage `json:"raw,omitempty"`
+	Name         string   `json:"name"`
+	URL          string   `json:"url"`
+	Price        *float64 `json:"price,omitempty"`
+	Currency     string   `json:"currency,omitempty"` // ISO 4217
+	Availability string   `json:"availability,omitempty"`
+	Condition    string   `json:"condition,omitempty"`
+	SellerName   string   `json:"seller_name,omitempty"`
+	Rating       *float64 `json:"rating,omitempty"` // schema.org 0-5 convention
+	ImageURL     string   `json:"image_url,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	Source       string   `json:"source"` // product-page domain, www stripped
+	Method       string   `json:"method"`
+	// BuyURL is the resolved merchant URL captured when the interact tier
+	// followed a deal aggregator's outbound tracker (slickdeals /click).
+	// Distinct from URL (the listing/thread address) — this is where the
+	// item is actually purchased.
+	BuyURL string          `json:"buy_url,omitempty"`
+	Raw    json.RawMessage `json:"raw,omitempty"`
 }
 
 // EnrichedCandidate is the stage output: the sourced candidate plus its

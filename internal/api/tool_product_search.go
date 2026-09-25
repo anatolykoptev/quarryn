@@ -69,6 +69,7 @@ func project(r rank.Result) productResult {
 	return productResult{
 		URL:             jc.URL,
 		Adapter:         jc.Source,
+		BuyURL:          jc.Product.BuyURL,
 		PublicProduct:   jc.ProductPublic(),
 		Score:           r.Score,
 		Confidence:      r.Confidence,
