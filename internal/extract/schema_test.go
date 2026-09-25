@@ -193,3 +193,47 @@ func TestParsePrice(t *testing.T) {
 		}
 	}
 }
+
+// productGroupHTML mirrors the Google-recommended variant shape Shopify
+// themes now emit (observed live on allbirds.com): a top-level
+// ProductGroup carrying name/brand/description, offers living on
+// hasVariant Product items.
+const productGroupHTML = `<!doctype html><html><head>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"ProductGroup",
+ "productGroupID":"MENS_STRIDER","name":"Men's Strider Explore",
+ "description":"Active shoe.",
+ "url":"https://shop.example.com/products/mens-strider-explore",
+ "brand":{"@type":"Brand","name":"Allbirds"},
+ "aggregateRating":{"@type":"AggregateRating","ratingValue":"3.8","reviewCount":"39"},
+ "hasVariant":[
+  {"@type":"Product","name":"Men's Strider Explore - Natural Black - Size 8",
+   "sku":"A11768M080","size":"8",
+   "offers":{"@type":"Offer","price":"98.00","priceCurrency":"USD",
+    "availability":"https://schema.org/InStock"}},
+  {"@type":"Product","name":"Men's Strider Explore - Natural Black - Size 9",
+   "sku":"A11768M090","size":"9",
+   "offers":{"@type":"Offer","price":"110.00","priceCurrency":"USD",
+    "availability":"https://schema.org/OutOfStock"}}]}
+</script></head><body><h1>Men's Strider Explore</h1></body></html>`
+
+func TestSchemaProductGroupVariants(t *testing.T) {
+	// ProductGroup must be treated as product-shaped: group name wins,
+	// offers come from the first hasVariant Product.
+	p, err := productFromSchema([]byte(productGroupHTML), "https://shop.example.com/products/mens-strider-explore")
+	if err != nil {
+		t.Fatalf("productFromSchema: %v", err)
+	}
+	if p.Name != "Men's Strider Explore" {
+		t.Fatalf("name = %q", p.Name)
+	}
+	if p.Price == nil || *p.Price != 98.0 {
+		t.Fatalf("price = %v (first variant offer must win)", p.Price)
+	}
+	if p.Currency != "USD" || p.Availability != "in_stock" {
+		t.Fatalf("currency/avail = %q %q", p.Currency, p.Availability)
+	}
+	if p.Rating == nil || *p.Rating != 3.8 {
+		t.Fatalf("rating = %v", p.Rating)
+	}
+}

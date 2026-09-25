@@ -81,7 +81,7 @@ func productItems(md *microdata.Microdata) []*microdata.Item {
 }
 
 func appendProductItems(out []*microdata.Item, it *microdata.Item) []*microdata.Item {
-	if it.IsOfSchemaType("Product") {
+	if it.IsOfSchemaType("Product") || it.IsOfSchemaType("ProductGroup") {
 		return append(out, it)
 	}
 	if g, ok := it.GetNested("@graph"); ok {
@@ -150,10 +150,32 @@ func productFromItem(item *microdata.Item, pageURL string) *Product {
 			applyOffer(p, off)
 		}
 	}
+	// ProductGroup (Google's variant shape on Shopify etc.): offers and
+	// variant attributes live on hasVariant Products — earlier variants
+	// win, matching the offer precedence above.
+	if item.IsOfSchemaType("ProductGroup") {
+		applyVariantOffers(p, item)
+	}
 	p.Currency = normalizeCurrency(p.Currency)
 	p.Condition = normalizeCondition(p.Condition)
 	p.Availability = normalizeAvailability(p.Availability)
 	return p
+}
+
+// applyVariantOffers fills Product offer fields from a ProductGroup's
+// hasVariant Products; earlier variants win on conflicts.
+func applyVariantOffers(p *Product, group *microdata.Item) {
+	vars, ok := group.GetNested("hasVariant")
+	if !ok {
+		return
+	}
+	for _, v := range vars.Items {
+		if offers, ok := v.GetNested("offers"); ok {
+			for _, off := range offers.Items {
+				applyOffer(p, off)
+			}
+		}
+	}
 }
 
 // applyOffer fills still-empty Product fields from one Offer or
