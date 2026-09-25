@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4](https://github.com/anatolykoptev/go-product-search/compare/v1.0.3...v1.0.4) (2026-09-25)
+
+
+### Fixed
+
+* **sources:** surface slickdeals card data, AND-match shopify queries ([#23](https://github.com/anatolykoptev/go-product-search/issues/23)) ([8b56387](https://github.com/anatolykoptev/go-product-search/commit/8b563877a80239787e68aac3bb4bab60ad5709b6))
+
 ## [1.0.3](https://github.com/anatolykoptev/go-product-search/compare/v1.0.2...v1.0.3) (2026-09-25)
 
 
