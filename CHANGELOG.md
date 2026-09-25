@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/anatolykoptev/go-product-search/compare/v1.3.2...v1.3.3) (2026-09-25)
+
+
+### Changed
+
+* **extract:** extract interact-yield warn helper ([#36](https://github.com/anatolykoptev/go-product-search/issues/36)) ([d79a8cc](https://github.com/anatolykoptev/go-product-search/commit/d79a8cc461ce802244a674481a902fe995b03ce1))
+
 ## [1.3.2](https://github.com/anatolykoptev/go-product-search/compare/v1.3.1...v1.3.2) (2026-09-25)
 
 
