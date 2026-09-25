@@ -12,8 +12,9 @@ import (
 
 // Tool name constants — the per-tool timeout map in main.go keys on these.
 const (
-	toolProductSearch = "product_search"
-	toolProductMatch  = "product_match"
+	toolProductSearch   = "product_search"
+	toolProductMatch    = "product_match"
+	toolProductFeedback = "product_feedback"
 )
 
 // Result-capping defaults for product_search. The funnel already bounds
@@ -24,23 +25,28 @@ const (
 )
 
 // deps bundles what the tool handlers close over: the retained searcher,
-// the fusion weights/pass threshold resolved once from config, and the
-// pipeline init error (non-nil → handlers report it instead of the tool
-// silently missing).
+// the fusion weights/pass threshold resolved once from config, the
+// feedback outcome sink (ADR-10), and the pipeline init error (non-nil →
+// handlers report it instead of the tool silently missing).
 type deps struct {
 	searcher *search.Searcher
 	weights  rank.Weights
 	passMin  float64
+	feedback *FeedbackStore
 	initErr  error
 }
 
-// RegisterTools binds product_search and product_match to the server. On a
-// pipeline init error the tools still register — they return the stored
-// error loudly rather than the tools vanishing from the listing (a missing
-// tool reads as "unsupported", an erroring tool reads as "down").
+// RegisterTools binds product_search, product_match and product_feedback
+// to the server. On a pipeline init error the search tools still register —
+// they return the stored error loudly rather than the tools vanishing from
+// the listing (a missing tool reads as "unsupported", an erroring tool
+// reads as "down"). product_feedback is independent of the pipeline and
+// always works.
 //
-// RESTBridge auto-exposes both under /api/tools/* — no REST handlers here.
-func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, initErr error) {
+// RESTBridge auto-exposes the tools under /api/tools/*; the feedback tool
+// additionally answers on POST /api/v1/feedback (registered in main.go,
+// same store).
+func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, feedback *FeedbackStore, initErr error) {
 	d := deps{
 		searcher: searcher,
 		weights: rank.Weights{
@@ -48,11 +54,13 @@ func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config
 			Deal:   cfg.RankDealWeight,
 			Jeff:   cfg.RankJeffWeight,
 		},
-		passMin: cfg.JeffMatchMin,
-		initErr: initErr,
+		passMin:  cfg.JeffMatchMin,
+		feedback: feedback,
+		initErr:  initErr,
 	}
 	registerProductSearch(srv, d)
 	registerProductMatch(srv, d)
+	registerProductFeedback(srv, d)
 }
 
 // unavailable reports the init error every tool handler surfaces when the

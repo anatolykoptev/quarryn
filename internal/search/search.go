@@ -27,6 +27,11 @@ type Searcher struct {
 	pipeline *extract.Pipeline
 	matcher  *match.Matcher
 	registry map[string]pssources.Adapter
+	// maxPages caps wowa fetch/render calls per request
+	// (MAX_PAGES_PER_SEARCH) — attached to the request ctx as a
+	// PageBudget the fetch gate consumes. <=0 attaches no budget
+	// (unbounded; a zero-value Config — every test — stays uncapped).
+	maxPages int
 }
 
 // Output is the full search result: jeff-judged candidates plus the
@@ -43,12 +48,13 @@ type Output struct {
 }
 
 // New builds the pipeline: a go-wowa client (all third-party egress,
-// ADR-1), the env-resolved adapter registry (ADR-13/16), the sourcing
-// funnel (ADR-8), the extraction stage (ADR-2/7/14) and the jeff match
-// stage (ADR-3/4/5/11/12). Adapter credentials resolve from env inside
-// RegistryConfigFromEnv; missing creds leave adapters dark, not fatal. An
-// absent JEFF_URL builds a degrade-mode matcher — deterministic ranking
-// only, flagged on every result.
+// ADR-1) behind the P6 fetch gate (per-request page budget, per-domain
+// pacing + throttle backoff), the env-resolved adapter registry
+// (ADR-13/16), the sourcing funnel (ADR-8), the extraction stage
+// (ADR-2/7/14) and the jeff match stage (ADR-3/4/5/11/12). Adapter
+// credentials resolve from env inside RegistryConfigFromEnv; missing creds
+// leave adapters dark, not fatal. An absent JEFF_URL builds a degrade-mode
+// matcher — deterministic ranking only, flagged on every result.
 func New(cfg config.Config) (*Searcher, error) {
 	wc, err := wowa.NewClient(cfg.WowaURL)
 	if err != nil {
@@ -65,31 +71,43 @@ func New(cfg config.Config) (*Searcher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("search: jeff matcher: %w", err)
 	}
-	registry := pssources.NewRegistry(pssources.RegistryConfigFromEnv(wc, nil))
+	// One pacer paces every domain the request touches — SERP adapter
+	// fetches and detail fetches/renders share the table so a throttled
+	// marketplace backs off for both stages.
+	pacer := pssources.NewDomainPacer(cfg.DomainMinInterval, 0)
+	serpGate := pssources.NewFetchGate(wc, nil, "serp", pacer)
+	detailGate := pssources.NewFetchGate(wc, wc, "detail", pacer)
+	registry := pssources.NewRegistry(pssources.RegistryConfigFromEnv(serpGate, nil))
 	s := &Searcher{
 		funnel:   pssources.NewFunnel(registry),
-		pipeline: newPipeline(cfg, wc, registry),
+		pipeline: newPipeline(cfg, detailGate, wc, registry),
 		matcher:  matcher,
 		registry: registry,
+		maxPages: cfg.MaxPagesPerSearch,
 	}
 	slog.Info("search stage ready", slog.Any("adapters", s.AdapterStatus()))
 	return s, nil
 }
 
-// newPipeline wires the P3 extraction stage: the wowa client backs both
-// detail fetches and the fenced LLM fallback; FetchClasses come from each
-// adapter's declared Spec so render-class sources defer correctly.
-func newPipeline(cfg config.Config, wc *wowa.Client, registry map[string]pssources.Adapter) *extract.Pipeline {
+// newPipeline wires the P3/P6 extraction stage: the gated wowa client backs
+// detail fetches AND the render escalation (both count against the page
+// budget and pace per domain), while the fenced LLM fallback stays on the
+// raw client — /extract fetches server-side through its own solver path.
+// FetchClasses come from each adapter's declared Spec so render-class
+// sources escalate correctly.
+func newPipeline(cfg config.Config, gate *pssources.FetchGate, llm extract.LLMCaller, registry map[string]pssources.Adapter) *extract.Pipeline {
 	classes := make(map[string]pssources.FetchClass, len(registry))
 	for name, a := range registry {
 		classes[name] = a.Spec().FetchClass
 	}
-	return extract.New(wc, wc, extract.Config{
+	return extract.New(gate, llm, extract.Config{
 		LLMTopN:          cfg.ExtractLLMTopN,
 		MaxDetailFetches: cfg.ExtractMaxDetailFetches,
 		Concurrency:      cfg.ExtractConcurrency,
 		CandidateTimeout: cfg.ExtractCandidateTimeout,
 		FetchTimeoutSecs: cfg.ExtractFetchTimeoutSecs,
+		LLMDailyMax:      cfg.ExtractLLMDailyMax,
+		Render:           gate,
 		FetchClasses:     classes,
 		Cache:            newExtractCache(cfg),
 	})
@@ -141,6 +159,13 @@ func (s *Searcher) SearchDetailed(ctx context.Context, query string, criteria []
 	if err != nil {
 		return Output{}, err
 	}
+	// The P6 page budget rides the request ctx: every wowa fetch/render —
+	// adapter SERP calls and extraction detail fetches alike — counts
+	// against MAX_PAGES_PER_SEARCH. On cap the gate stops detail fetches
+	// and ranking proceeds with what exists.
+	if s.maxPages > 0 {
+		ctx = pssources.WithPageBudget(ctx, pssources.NewPageBudget(s.maxPages))
+	}
 	q := sources.Query{Text: query, Limit: limit}
 	out, err := s.funnel.Search(ctx, q)
 	if err != nil {
@@ -169,6 +194,11 @@ func (s *Searcher) MatchURL(ctx context.Context, rawURL string, criteria []strin
 	plan, err := match.PlanCriteria(criteria)
 	if err != nil {
 		return Output{}, err
+	}
+	// Same page budget as a search — one URL fits easily, but the cap keeps
+	// the fetch/render path honest and identical to the funnel path.
+	if s.maxPages > 0 {
+		ctx = pssources.WithPageBudget(ctx, pssources.NewPageBudget(s.maxPages))
 	}
 	c := pssources.Candidate{Source: "direct", URL: rawURL}
 	mres := s.matcher.Match(ctx, s.pipeline.Enrich(ctx, []pssources.Candidate{c}), plan)

@@ -22,6 +22,9 @@ const (
 	MethodSERP = "serp"
 	// MethodSchema: a detail-page fetch + schema.org parse contributed.
 	MethodSchema = "schema"
+	// MethodRender: a stealth-Chrome render + schema.org parse contributed
+	// (P6 — the page needed JS, the render tier delivered it).
+	MethodRender = "render"
 	// MethodLLM: the wowa /api/v1/extract fallback contributed.
 	MethodLLM = "llm"
 )
@@ -61,9 +64,18 @@ type EnrichedCandidate struct {
 
 	// NeedsRender marks a candidate whose detail page requires JS
 	// rendering — the adapter declared FetchClass=render, or the fetch hit
-	// a bot-wall challenge. The render path lands in P6; extraction is
-	// deferred, not failed.
+	// a bot-wall challenge — AND the P6 render tier did not deliver a
+	// usable page (no renderer wired, render call failed, or budget
+	// refused). Match excludes these: the product is untrusted or empty.
+	// A successfully rendered page clears through schema.org parse like
+	// any detail fetch and never sets this flag.
 	NeedsRender bool `json:"needs_render,omitempty"`
+
+	// LLMBudgetExhausted marks a candidate that skipped the fenced LLM
+	// fallback because the process-local daily spend cap
+	// (EXTRACT_LLM_DAILY_MAX) was reached. Typed data, not an error — the
+	// candidate continues with whatever the cheaper tiers produced.
+	LLMBudgetExhausted bool `json:"llm_budget_exhausted,omitempty"`
 }
 
 // PublicBlurbMax caps the description blurb that may leave the box.

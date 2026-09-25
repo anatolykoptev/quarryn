@@ -3,6 +3,7 @@ package extract
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync/atomic"
@@ -19,9 +20,12 @@ import (
 // extractOutcomes is the stage's observability surface: one increment per
 // candidate. Vocabulary: serp (SERP fields sufficient) | cache (extraction
 // cache hit) | schema (detail fetch + schema.org fill) | llm (fenced LLM
-// fallback) | render_deferred (page needs JS render — P6) | over_budget
-// (detail-fetch budget exhausted) | fetch_failed | incomplete (required
-// fields never obtained) | invalid (values rejected by strict validation).
+// fallback) | render (stealth-Chrome detail page parsed) | render_deferred
+// (page needs JS render but no renderer is wired) | render_failed |
+// over_budget (detail-fetch or per-request page budget exhausted) |
+// llm_budget (daily LLM spend cap reached — candidate kept unenriched) |
+// fetch_failed | incomplete (required fields never obtained) | invalid
+// (values rejected by strict validation).
 var extractOutcomes = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "prodsearch",
@@ -44,6 +48,16 @@ type LLMCaller interface {
 	Extract(ctx context.Context, req wowa.ExtractRequest) (*wowa.ExtractResponse, error)
 }
 
+// Renderer is the wowa /api/v1/render surface (stealth Chrome) — the P6
+// escalation path for detail pages the plain fetch cannot read (adapter
+// declared FetchClass=render, or the fetch answered a CF challenge).
+// *wowa.Client satisfies it; in production it is the detail-stage fetch
+// gate so renders share the page budget and domain pacing. Nil keeps the
+// P3 deferral behaviour.
+type Renderer interface {
+	Render(ctx context.Context, req wowa.RenderRequest) (*wowa.RenderResponse, error)
+}
+
 // Config bundles pipeline limits and injected dependencies.
 type Config struct {
 	// LLMTopN gates the LLM fallback to the top-N funnel-ranked candidates
@@ -62,9 +76,19 @@ type Config struct {
 	FetchTimeoutSecs int
 	// LLMMaxChars caps page content fed to /extract. Default 12000.
 	LLMMaxChars int
-	// FetchClasses maps adapter name → declared FetchClass (ADR-13);
-	// render-class sources skip detail work. Unknown sources default to
-	// fetch.
+	// LLMDailyMax is the process-local daily cap on wowa /extract calls
+	// (EXTRACT_LLM_DAILY_MAX, ADR-12). Default 50. The counter resets at
+	// UTC midnight and on restart — it bounds LLM spend per process, not
+	// per calendar; persistence was deliberately skipped (budget.go).
+	LLMDailyMax int
+	// Render is the P6 stealth-Chrome escalation for detail pages the
+	// plain fetch cannot read (FetchClass=render adapters, CF-challenged
+	// pages). The call consumes the same detail budget — render is a
+	// detail fetch. Nil keeps the P3 deferral (NeedsRender + skip).
+	Render Renderer
+	// FetchClasses maps adapter name → declared FetchClass (ADR-13).
+	// Render-class sources route detail work through Render instead of
+	// the plain fetcher. Unknown sources default to fetch.
 	FetchClasses map[string]sources.FetchClass
 	// Cache is the ADR-7 extraction cache (L1 + optional Redis L2).
 	// Injected, not wrapped; nil disables caching.
@@ -90,23 +114,27 @@ func (c *Config) applyDefaults() {
 	if c.LLMMaxChars <= 0 {
 		c.LLMMaxChars = 12000
 	}
+	if c.LLMDailyMax <= 0 {
+		c.LLMDailyMax = 50
+	}
 }
 
 // Pipeline is the extraction stage: serp → (cache) → schema.org detail →
 // fenced LLM, with strict validation on everything it emits. Construct via
 // New; safe for concurrent Enrich calls.
 type Pipeline struct {
-	fetch Fetcher
-	llm   LLMCaller
-	cfg   Config
+	fetch     Fetcher
+	llm       LLMCaller
+	cfg       Config
+	llmBudget *dailyBudget
 }
 
 // New builds the pipeline. fetch/llm are the wowa client surfaces (llm may
 // be nil to disable the fallback tier); cfg carries limits, the source→
-// FetchClass map and the injected cache.
+// FetchClass map, the optional render escalation and the injected cache.
 func New(fetch Fetcher, llm LLMCaller, cfg Config) *Pipeline {
 	cfg.applyDefaults()
-	return &Pipeline{fetch: fetch, llm: llm, cfg: cfg}
+	return &Pipeline{fetch: fetch, llm: llm, cfg: cfg, llmBudget: newDailyBudget(cfg.LLMDailyMax)}
 }
 
 // Close releases pipeline resources (the cache's cleanup goroutine). The
@@ -160,14 +188,7 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 		ec.ExtractionFailed = true
 		ec.FailureReason = strings.Join(probs, "; ")
 		if outcome == "" {
-			switch {
-			case ec.NeedsRender:
-				outcome = "render_deferred"
-			case missingRequired(&prod):
-				outcome = "incomplete"
-			default:
-				outcome = "invalid"
-			}
+			outcome = failureOutcome(&ec, &prod)
 		}
 	}
 	if outcome == "" {
@@ -179,13 +200,29 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 	// merges are free to recompute, and a poisoned entry would outlive the
 	// candidate list by 24h.
 	if !ec.ExtractionFailed && p.cfg.Cache != nil && key != "" &&
-		(prod.Method == MethodSchema || prod.Method == MethodLLM) {
+		(prod.Method == MethodSchema || prod.Method == MethodRender || prod.Method == MethodLLM) {
 		if raw, err := json.Marshal(prod); err == nil {
 			p.cfg.Cache.Set(ctx, key, raw)
 		}
 	}
 	ec.Product = prod
 	return ec
+}
+
+// failureOutcome picks the metric label for a failed candidate when the
+// detail path left the choice open — the flag-based dispositions beat the
+// generic incomplete/invalid split.
+func failureOutcome(ec *EnrichedCandidate, prod *Product) string {
+	switch {
+	case ec.NeedsRender:
+		return "render_failed"
+	case ec.LLMBudgetExhausted:
+		return "llm_budget"
+	case missingRequired(prod):
+		return "incomplete"
+	default:
+		return "invalid"
+	}
 }
 
 // cachedProduct returns the validated product the cache holds for this
@@ -205,71 +242,152 @@ func (p *Pipeline) cachedProduct(ctx context.Context, key string) (*Product, boo
 	return &prod, true
 }
 
-// extractDetail runs the detail-fetch + LLM tiers for a candidate whose
-// SERP fields did not validate. It mutates prod and ec, and returns a
+// extractDetail runs the detail-fetch + render + LLM tiers for a candidate
+// whose SERP fields did not validate. It mutates prod and ec, and returns a
 // disposition outcome only for hard stops ("render_deferred",
-// "over_budget", "fetch_failed"); "" leaves outcome selection to the
-// caller's final state.
+// "render_failed", "over_budget", "fetch_failed"); "" leaves outcome
+// selection to the caller's final state.
 func (p *Pipeline) extractDetail(ctx context.Context, rank int, c sources.Candidate, prod *Product, ec *EnrichedCandidate, budget *atomic.Int64) string {
-	if p.fetchClass(c.Source) == sources.FetchClassRender {
-		// Render-class pages need the P6 render path for BOTH schema.org and
-		// LLM (wowa /extract reads via /read, unrendered) — skip both, flag
-		// for the render stage.
-		ec.NeedsRender = true
-		return "render_deferred"
-	}
-	if budget.Add(-1) < 0 {
-		return "over_budget"
-	}
-	if p.fetch == nil {
-		return "fetch_failed"
+	declaredRender := p.fetchClass(c.Source) == sources.FetchClassRender
+	needRender := declaredRender
+	if !declaredRender {
+		escalate, outcome := p.fetchDetail(ctx, c, prod, budget)
+		if outcome != "" {
+			return outcome
+		}
+		needRender = escalate
 	}
 
+	if needRender {
+		outcome := p.renderDetail(ctx, c, prod, budget)
+		if outcome != "" {
+			// The render tier could not deliver the page — flag the
+			// candidate so match excludes it (match.go: NeedsRender →
+			// excluded). On a CF escalation the LLM tier still runs:
+			// wowa /extract fetches through its own solver path. For
+			// declared render-class sources it is skipped entirely —
+			// /extract reads via /read, unrendered, and would hit the same
+			// wall.
+			ec.NeedsRender = true
+			if !declaredRender {
+				p.tryLLM(ctx, rank, c, prod, ec)
+			}
+			return outcome
+		}
+		if declaredRender {
+			return ""
+		}
+	}
+
+	p.tryLLM(ctx, rank, c, prod, ec)
+	return ""
+}
+
+// fetchDetail runs the plain wowa /fetch detail tier for a fetch-class
+// candidate, merging schema.org output into prod. It returns (needRender,
+// outcome): a non-empty outcome is a hard stop ("over_budget" |
+// "fetch_failed"), needRender marks a CF bot-wall escalation to the render
+// tier.
+func (p *Pipeline) fetchDetail(ctx context.Context, c sources.Candidate, prod *Product, budget *atomic.Int64) (needRender bool, outcome string) {
+	if budget.Add(-1) < 0 {
+		return false, "over_budget"
+	}
+	if p.fetch == nil {
+		return false, "fetch_failed"
+	}
 	resp, err := p.fetch.Fetch(ctx, wowa.FetchRequest{
 		URL:         c.URL,
 		TimeoutSecs: p.cfg.FetchTimeoutSecs,
 	})
 	switch {
+	case errors.Is(err, sources.ErrPageBudgetExhausted),
+		errors.Is(err, sources.ErrDomainThrottled):
+		// P6 gate stops: page budget spent or the domain throttled out this
+		// search. Both mean "rank what exists" — no wire call or a refused
+		// retry, never an error worth failing the search over.
+		return false, "over_budget"
 	case err != nil:
 		// wowa is down — the /extract fallback would fail identically.
 		slog.Warn("extract: detail fetch failed",
 			slog.String("url", c.URL), slog.Any("error", err))
-		return "fetch_failed"
+		return false, "fetch_failed"
 	case resp.Status >= 400:
 		// Dead page — the LLM would hit the same corpse; skip everything.
-		return "fetch_failed"
+		return false, "fetch_failed"
 	case resp.CFDetected:
-		// Bot-wall challenge page: schema.org parse would find nothing, and
-		// the render tier (P6) owns the retry. The LLM tier still runs —
-		// wowa /extract fetches through its own solver path.
-		ec.NeedsRender = true
+		// Bot-wall challenge page: the plain fetch carried the page but a
+		// schema.org parse would find nothing — escalate to the render tier.
+		return true, ""
 	default:
 		p.schemaMerge(c, resp.Body, prod)
+		return false, ""
 	}
+}
 
-	p.tryLLM(ctx, rank, c, prod)
-	return ""
+// renderDetail fetches the page through wowa /render (stealth Chrome) and
+// schema-merges the HTML. It consumes the same per-Enrich detail budget —
+// a render is a detail fetch — while the gate's page budget and domain
+// pacing bound the wire call itself. Returns "" on a successful parse
+// (product marked MethodRender); otherwise the hard-stop outcome:
+// "render_deferred" when no renderer is wired, "over_budget" when either
+// budget refuses, "render_failed" on a call or parse failure.
+func (p *Pipeline) renderDetail(ctx context.Context, c sources.Candidate, prod *Product, budget *atomic.Int64) string {
+	if p.cfg.Render == nil {
+		return "render_deferred"
+	}
+	if budget.Add(-1) < 0 {
+		return "over_budget"
+	}
+	resp, err := p.cfg.Render.Render(ctx, wowa.RenderRequest{
+		URL:         c.URL,
+		TimeoutSecs: p.cfg.FetchTimeoutSecs,
+	})
+	switch {
+	case errors.Is(err, sources.ErrPageBudgetExhausted),
+		errors.Is(err, sources.ErrDomainThrottled):
+		return "over_budget"
+	case err != nil:
+		slog.Warn("extract: detail render failed",
+			slog.String("url", c.URL), slog.Any("error", err))
+		return "render_failed"
+	case p.schemaMerge(c, resp.HTML, prod):
+		prod.Method = MethodRender
+		return ""
+	default:
+		return "render_failed"
+	}
 }
 
 // schemaMerge parses a fetched page body for schema.org Product data and
-// merges it into prod.
-func (p *Pipeline) schemaMerge(c sources.Candidate, body string, prod *Product) {
+// merges it into prod. Returns true when a product was merged.
+func (p *Pipeline) schemaMerge(c sources.Candidate, body string, prod *Product) bool {
 	sp, err := productFromSchema([]byte(body), c.URL)
 	if err != nil || sp == nil {
 		slog.Debug("extract: no schema.org product",
 			slog.String("url", c.URL), slog.Any("error", err))
-		return
+		return false
 	}
 	mergeMissing(prod, sp)
 	prod.Method = MethodSchema
+	return true
 }
 
-// tryLLM runs the fenced LLM tier when the ADR-2 gate allows: top-N
-// funnel-ranked survivors still missing required fields.
-func (p *Pipeline) tryLLM(ctx context.Context, rank int, c sources.Candidate, prod *Product) {
+// tryLLM runs the fenced LLM tier when the gates allow: the ADR-2 top-N
+// funnel-rank gate plus the ADR-12 daily spend cap (EXTRACT_LLM_DAILY_MAX).
+// A spent budget is not an error — the candidate continues unenriched with
+// LLMBudgetExhausted set so the outcome lands in the stage metrics.
+func (p *Pipeline) tryLLM(ctx context.Context, rank int, c sources.Candidate, prod *Product, ec *EnrichedCandidate) {
 	if p.llm == nil || rank >= p.cfg.LLMTopN || !missingRequired(prod) {
 		return
 	}
+	if !p.llmBudget.tryConsume() {
+		llmBudgetExhaustedTotal.Inc()
+		ec.LLMBudgetExhausted = true
+		slog.Info("extract: daily LLM budget spent — candidate stays unenriched",
+			slog.String("url", c.URL))
+		return
+	}
+	llmExtractCallsTotal.Inc()
 	lp, err := p.llmExtract(ctx, c.URL)
 	if err != nil {
 		slog.Warn("extract: llm fallback failed",

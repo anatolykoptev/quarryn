@@ -36,6 +36,10 @@ func main() {
 // mcpserver.Serve owns the lifecycle: signal.NotifyContext(SIGINT/SIGTERM) →
 // graceful shutdown with cfg.ShutdownTimeout.
 func runMCPServer(cfg config.Config) error {
+	// The ADR-10 outcome sink is built once and shared by the
+	// product_feedback tool and the POST /api/v1/feedback REST twin.
+	// Unwritable path → log-only mode, never fatal.
+	feedback := api.NewFeedbackStore(cfg.FeedbackFile)
 	hooks := mcpserver.MCPHooks{
 		OnToolResult: func(_ context.Context, name string, dur time.Duration, isErr bool) {
 			slog.Info("tool_result", slog.String("tool", name),
@@ -54,6 +58,9 @@ func runMCPServer(cfg config.Config) error {
 				"version": version,
 			})
 		})
+		// The feedback REST twin — same store as the product_feedback MCP
+		// tool, for callers that want a plain POST.
+		mux.HandleFunc("POST /api/v1/feedback", feedback.FeedbackHandler())
 	}
 	return mcpserver.Serve(&mcp.Implementation{
 		Name:    "go-product-search",
@@ -68,7 +75,7 @@ func runMCPServer(cfg config.Config) error {
 		if err != nil {
 			slog.Error("search pipeline init failed", slog.Any("error", err))
 		}
-		api.RegisterTools(srv, searcher, cfg, err)
+		api.RegisterTools(srv, searcher, cfg, feedback, err)
 	})
 }
 
