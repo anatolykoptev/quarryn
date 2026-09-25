@@ -198,3 +198,41 @@ func TestEnrichNoRendererKeepsDeferral(t *testing.T) {
 		t.Fatalf("no renderer must defer: %+v", out[0])
 	}
 }
+
+// TestEnrichCFErrorEscalatesToRender — wowa surfaces a CF challenge page as
+// a transport error ("remote error (http 502): cloudflare
+// managed_challenge_200"), not as a CFDetected body. The detail tier must
+// escalate that error signature to the render tier the same way.
+func TestEnrichCFErrorEscalatesToRender(t *testing.T) {
+	f := &stubFetcher{err: errors.New("wowa: fetch: remote error (http 502): cloudflare managed_challenge_200 (HTTP 200, ray abc123-SJC)")}
+	r := &stubRenderer{html: amazonProductHTML}
+	cfg := testConfig()
+	cfg.Render = r
+	p := New(f, nil, cfg)
+
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		cand("https://slickdeals.net/f/1-widget", "widget", nil),
+	})
+	if f.calls.Load() != 1 || r.calls.Load() != 1 {
+		t.Fatalf("fetch=%d render=%d, want 1/1", f.calls.Load(), r.calls.Load())
+	}
+	if out[0].NeedsRender || out[0].ExtractionFailed {
+		t.Fatalf("CF-error candidate wrongly flagged: %+v", out[0])
+	}
+	if out[0].Product.Method != MethodRender || out[0].Product.Price == nil {
+		t.Fatalf("rendered product = %+v", out[0].Product)
+	}
+}
+
+// TestEnrichCFErrorNoRendererMarksNeedsRender — same CF error with no
+// renderer wired degrades to the NeedsRender deferral, not fetch_failed.
+func TestEnrichCFErrorNoRendererMarksNeedsRender(t *testing.T) {
+	f := &stubFetcher{err: errors.New("remote error (http 502): cloudflare managed_challenge_200")}
+	p := New(f, nil, testConfig())
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		cand("https://slickdeals.net/f/2-widget", "widget", nil),
+	})
+	if !out[0].NeedsRender {
+		t.Fatalf("no-renderer CF error must flag NeedsRender: %+v", out[0])
+	}
+}
