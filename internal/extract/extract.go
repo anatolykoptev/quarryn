@@ -544,12 +544,19 @@ func interactPayload(resp *wowa.InteractResponse) (head, extra string) {
 		if a.Action != "evaluate" || !a.Ok {
 			continue
 		}
+		raw := a.Data
+		// evaluate returns the script's value; a JSON.stringify payload
+		// arrives as a quoted JSON string — unwrap before decoding.
+		var str string
+		if json.Unmarshal(raw, &str) == nil && strings.HasPrefix(str, "{") {
+			raw = json.RawMessage(str)
+		}
 		var payload struct {
 			H     string `json:"h"`
 			U     string `json:"u"`
 			Click string `json:"click"`
 		}
-		if json.Unmarshal(a.Data, &payload) != nil {
+		if json.Unmarshal(raw, &payload) != nil {
 			continue
 		}
 		if payload.Click != "" {
