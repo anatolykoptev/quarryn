@@ -482,6 +482,10 @@ func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidat
 			prod.Description = og
 		}
 	}
+	if got == "" && click == "" {
+		slog.Warn("extract: interact yielded no usable payload",
+			slog.String("url", c.URL))
+	}
 	// Deal aggregators keep the buyable URL behind an outbound tracker
 	// (slickdeals /click). Follow it in-session — the merchant page may
 	// carry real Product schema the thread never had.
@@ -503,13 +507,15 @@ const interactExtractJS = `JSON.stringify({
 // session and schema-merges the merchant page it lands on. On success it
 // records the resolved merchant URL as BuyURL.
 func (p *Pipeline) interactOutbound(ctx context.Context, session, click string, c sources.Candidate, prod *Product) bool {
+	// URL carries the merchant link directly: the named session reuses the
+	// CF-cleared tab and the request's own navigate phase goes straight to
+	// the merchant page — no second thread navigation, no re-solve.
 	resp, err := p.cfg.Interact.Interact(ctx, wowa.InteractRequest{
-		URL:         c.URL,
+		URL:         click,
 		TimeoutSecs: 45,
 		Session:     session,
 		Actions: []wowa.Action{
-			{Type: "navigate", URL: click},
-			{Type: "wait_for", WaitMs: 8000},
+			{Type: "wait_for", WaitMs: 4000},
 			{Type: "evaluate", Script: `JSON.stringify({u:location.href,h:document.head?document.head.outerHTML.slice(0,400000):""})`},
 			{Type: "destroy_session"},
 		},
