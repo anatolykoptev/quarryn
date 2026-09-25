@@ -80,7 +80,7 @@ func New(cfg Config) (*Matcher, error) {
 	if cfg.Token == "" {
 		slog.Warn("match: jeff configured without JEFF_TOKEN; every Ask will degrade on 401")
 	}
-	jc, err := jeff.NewClient(cfg.URL, jeff.WithToken(cfg.Token))
+	jc, err := jeff.NewClient(cfg.URL, jeff.WithToken(cfg.Token), jeff.WithTimeout(m.callTimeout))
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,10 @@ func (m *Matcher) judgeOne(ctx context.Context, res *Result, idx int, questions 
 		verdicts = make(map[string]float64, len(questions))
 		for id := range questions {
 			a, ok := resp.Answers[id]
-			if !ok {
+			// A missing answer or an out-of-range noul (NaN fails the
+			// range check too) is unusable — degrade rather than feed
+			// wire garbage into MatchScore and the calibration histogram.
+			if !ok || !(a.Noul >= 0 && a.Noul <= 1) {
 				outcome = reasonNoAnswer
 				verdicts = nil
 				break
@@ -155,8 +158,12 @@ func (m *Matcher) judgeOne(ctx context.Context, res *Result, idx int, questions 
 		}
 	}
 
-	stateJSON, _ := json.Marshal(state)
-	verdictsJSON, _ := json.Marshal(verdicts)
+	stateJSON, sErr := json.Marshal(state)
+	verdictsJSON, vErr := json.Marshal(verdicts)
+	if sErr != nil || vErr != nil {
+		// Instrumentation only — a marshal failure here never fails the Ask.
+		slog.Debug("jeff_gate: marshal failed", "state_err", sErr, "verdicts_err", vErr)
+	}
 	attrs := []any{
 		"request_id", reqID, "candidate", jc.URL,
 		"questions", len(questions), "verdicts", string(verdictsJSON),

@@ -10,9 +10,11 @@
 //   - Packed Ask (ADR-4): ONE jeff Ask per candidate carries every
 //     criterion noul in Request.Questions (hard cap 64).
 //   - Degrade-on-jeff-failure (ADR-5): transport errors, 429/529, queue
-//     latency and ctx deadlines downgrade candidates to
+//     latency and missing answers downgrade candidates to
 //     deterministic-only ranking — loudly (Degraded flag + counter +
 //     warn log), never silently, and never fatal to the whole search.
+//     Caller-ctx cancellations still mark candidates ctx_deadline but
+//     are not jeff failures: no degrade flag, no counter.
 //   - Typed CandidateState (ADR-11): the jeff boundary accepts only the
 //     allowlisted, capped, control-stripped CandidateState built from
 //     extract.ProductPublic. jeff wire types never leave this package.
@@ -62,8 +64,9 @@ var (
 		[]string{"reason"},
 	)
 	// jeffDegradedTotal counts per-candidate degrade events by trigger:
-	// saturated | timeout | http_error | unavailable | no_answer |
-	// ctx_deadline | unconfigured.
+	// saturated | unavailable | timeout | http_error | no_answer |
+	// unconfigured. over_candidate_cap and ctx_deadline are budget/caller
+	// data — they mark the candidate but never reach this counter.
 	jeffDegradedTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "prodsearch",
@@ -96,8 +99,11 @@ type JudgedCandidate struct {
 	// UnjudgedReason then says why.
 	Verdicts map[string]float64 `json:"verdicts,omitempty"`
 	// Passed is the provisional gate: not excluded AND every verdict at or
-	// above JeffMatchMin. With no subjective criteria it reduces to the
-	// deterministic prefilter verdict.
+	// above JeffMatchMin. A candidate owed a jeff verdict that never
+	// arrived (jeff_* / ctx_deadline) reports false — an absent verdict
+	// is not a pass. over_candidate_cap and jeff_unconfigured keep the
+	// prefilter verdict: no jeff call was owed. With no subjective
+	// criteria it reduces to the deterministic prefilter verdict.
 	Passed bool `json:"passed"`
 	// MatchScore is the provisional fusion: 0.4·normalized funnel score +
 	// 0.6·mean noul probability. Zero on excluded candidates; the jeff
@@ -222,7 +228,8 @@ func (m *Matcher) capEligible(res *Result, cands []extract.EnrichedCandidate, el
 	if len(eligible) <= m.maxCands {
 		return eligible
 	}
-	sort.Slice(eligible, func(a, b int) bool {
+	// Stable so equal funnel scores keep the caller's candidate order.
+	sort.SliceStable(eligible, func(a, b int) bool {
 		return cands[eligible[a]].Score > cands[eligible[b]].Score
 	})
 	for _, i := range eligible[m.maxCands:] {

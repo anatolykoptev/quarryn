@@ -22,7 +22,10 @@ import (
 //	                     degrade: the service is unusable either way
 //	jeff_no_answer     — 200 OK but an answer entry is missing
 //	jeff_unconfigured  — no JEFF_URL; matcher built in degrade mode
-//	ctx_deadline       — caller ctx expired while queued or in flight
+//	ctx_deadline       — caller ctx expired while queued or in flight —
+//	                     caller cancellation is not a jeff failure: it
+//	                     marks the candidate but never bumps
+//	                     jeff_degraded_total or sets Result.Degraded
 //	over_candidate_cap — eligible but beyond MaxJeffCandidates (a budget
 //	                     decision — does NOT set Result.Degraded)
 const (
@@ -78,13 +81,33 @@ func isDeadline(err error) bool {
 
 // markUnjudged flags one candidate as not-jeff-judged and counts the
 // degrade. Writes only res.Candidates[idx] — disjoint per goroutine.
-// Budget cap and ctx-queue markings are data, not degrade events; only
-// jeff-side reasons bump the degrade counter.
 func (m *Matcher) markUnjudged(res *Result, idx int, reason string) {
-	res.Candidates[idx].UnjudgedReason = reason
-	if reason != reasonOverCap {
+	jc := &res.Candidates[idx]
+	jc.UnjudgedReason = reason
+	switch reason {
+	case reasonOverCap, reasonUnconfigured:
+		// jeff was never owed a verdict (budget cap / degrade-mode
+		// matcher) — Passed keeps its prefilter outcome.
+	default:
+		// An owed verdict that never arrived is not a pass.
+		jc.Passed = false
+	}
+	if isDegradeTrigger(reason) {
 		jeffDegradedTotal.WithLabelValues(reason).Inc()
 	}
+}
+
+// isDegradeTrigger reports whether an unjudged reason is a jeff-side
+// failure — the only markings that bump jeff_degraded_total and feed
+// Result.Degraded. over_candidate_cap is a budget decision and
+// ctx_deadline is the caller's own cancellation: data, not service
+// failures.
+func isDegradeTrigger(reason string) bool {
+	switch reason {
+	case "", reasonOverCap, reasonCtxDeadline:
+		return false
+	}
+	return true
 }
 
 // summarizeDegrade aggregates per-candidate unjudged markings into the
@@ -96,7 +119,7 @@ func summarizeDegrade(res *Result) {
 	unjudged := 0
 	for _, jc := range res.Candidates {
 		r := jc.UnjudgedReason
-		if r == "" || r == reasonOverCap {
+		if !isDegradeTrigger(r) {
 			continue
 		}
 		unjudged++

@@ -3,6 +3,7 @@ package match
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -217,6 +218,9 @@ func TestDegradeOn429(t *testing.T) {
 		if jc.MatchScore <= 0 {
 			t.Fatal("degraded candidate lost deterministic score")
 		}
+		if jc.Passed {
+			t.Fatal("unjudged candidate claims the gate")
+		}
 	}
 	// Ranking still orders by deterministic strength.
 	if res.Candidates[0].Product.Name != "A" {
@@ -321,12 +325,17 @@ func TestUnconfiguredMatcherDegrades(t *testing.T) {
 	if res.Candidates[0].UnjudgedReason != reasonUnconfigured {
 		t.Fatalf("unjudged = %q", res.Candidates[0].UnjudgedReason)
 	}
+	// Degrade mode owes no jeff verdict — the prefilter pass stands.
+	if !res.Candidates[0].Passed {
+		t.Fatal("unconfigured candidate lost its prefilter pass verdict")
+	}
 }
 
 // TestCallerCtxDeadlineWhileQueued — parent ctx death marks every
 // straggler ctx_deadline instead of hanging. The fake asker blocks until
 // ctx dies, so both the in-flight call and the queued candidate classify
-// deterministically.
+// deterministically. Caller cancellation is not a jeff failure: the
+// result is NOT Degraded and the candidates do not claim the gate.
 func TestCallerCtxDeadlineWhileQueued(t *testing.T) {
 	var calls atomic.Int32
 	m := testMatcher(fakeAsker{
@@ -349,15 +358,38 @@ func TestCallerCtxDeadlineWhileQueued(t *testing.T) {
 	cancel()
 	select {
 	case r := <-done:
-		if !r.Degraded {
-			t.Fatal("ctx death did not flag degraded")
+		if r.Degraded {
+			t.Fatal("caller ctx death flagged degraded — not a jeff failure")
 		}
 		for _, jc := range r.Candidates {
 			if jc.UnjudgedReason != reasonCtxDeadline {
 				t.Fatalf("unjudged = %q, want %s", jc.UnjudgedReason, reasonCtxDeadline)
 			}
+			if jc.Passed {
+				t.Fatal("ctx-canceled candidate claims the gate")
+			}
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Match hung on canceled ctx")
+	}
+}
+
+// TestOutOfRangeNoulDegrades — a wire noul outside [0,1] (NaN included)
+// is unusable: the candidate degrades to no_answer rather than poisoning
+// MatchScore and the calibration histogram.
+func TestOutOfRangeNoulDegrades(t *testing.T) {
+	for _, prob := range []float64{-0.2, 1.7, math.NaN(), math.Inf(1)} {
+		var calls atomic.Int32
+		m := testMatcher(fakeAsker{prob: prob, calls: &calls})
+		plan, _ := PlanCriteria([]string{"good battery"})
+		res := m.Match(t.Context(), []extract.EnrichedCandidate{
+			enriched("A", "http://a.example/1", 100),
+		}, plan)
+		if !res.Degraded || res.Candidates[0].UnjudgedReason != reasonNoAnswer {
+			t.Fatalf("noul %v not degraded: %+v", prob, res.Candidates[0])
+		}
+		if res.Candidates[0].Verdicts != nil || res.Candidates[0].Passed {
+			t.Fatalf("noul %v produced verdicts/pass: %+v", prob, res.Candidates[0])
+		}
 	}
 }

@@ -29,7 +29,9 @@ type Config struct {
 	RedisURL string
 
 	// JeffMatchMin is the minimum jeff score for a candidate to count as a
-	// match. MaxJeffCandidates caps how many scraped candidates go to jeff;
+	// match (values <=0 or >1 fall back to the 0.55 default in match.New —
+	// JEFF_MATCH_MIN=0 cannot express "accept every verdict").
+	// MaxJeffCandidates caps how many scraped candidates go to jeff;
 	// JeffConcurrency bounds in-flight jeff calls; JeffTimeout is the
 	// per-call deadline on each packed Ask (ADR-12).
 	JeffMatchMin      float64

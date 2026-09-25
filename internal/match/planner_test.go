@@ -82,6 +82,7 @@ func TestPlanCriteriaRejectsEmpty(t *testing.T) {
 func TestPlanCriteriaRejectsMalformedConstraint(t *testing.T) {
 	for _, bad := range []string{
 		"price_max:abc", "price_min:-5", "price_max:",
+		"price_max:NaN", "price_min:Inf", "price_max:+Inf",
 		"currency:US Dollar", "currency:12",
 		"brand:", "keyword:", "not_keyword:",
 	} {
@@ -134,5 +135,27 @@ func TestPlanCriteriaColonInProseStaysSubjective(t *testing.T) {
 	}
 	if plan.Constraints.PriceMax == nil || *plan.Constraints.PriceMax != 42 {
 		t.Fatalf("upper-case key should parse case-insensitively: %+v", plan.Constraints)
+	}
+}
+
+// TestPlanCriteriaDedupesSubjective — identical sanitized criteria would
+// ask jeff the same question twice; dedup before they eat the budget.
+// Dedup is exact on sanitized text — case variants stay distinct.
+func TestPlanCriteriaDedupesSubjective(t *testing.T) {
+	plan, err := PlanCriteria([]string{
+		"good battery", "usb-c", " good battery ", "GOOD BATTERY", "good battery",
+	})
+	if err != nil {
+		t.Fatalf("PlanCriteria: %v", err)
+	}
+	if len(plan.Questions) != 3 {
+		t.Fatalf("questions = %+v", plan.Questions)
+	}
+	for i, want := range []struct{ id, crit string }{
+		{"c0", "good battery"}, {"c1", "usb-c"}, {"c2", "GOOD BATTERY"},
+	} {
+		if plan.Questions[i].ID != want.id || plan.Questions[i].Criterion != want.crit {
+			t.Fatalf("question %d = %+v", i, plan.Questions[i])
+		}
 	}
 }

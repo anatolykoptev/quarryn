@@ -129,6 +129,9 @@ func TestMatchCandidateCap(t *testing.T) {
 	if byName["Weak"].UnjudgedReason != "over_candidate_cap" {
 		t.Fatalf("weak unjudged = %q", byName["Weak"].UnjudgedReason)
 	}
+	if !byName["Weak"].Passed {
+		t.Fatal("over-cap candidate lost its prefilter pass verdict")
+	}
 	if byName["Weak"].MatchScore <= 0 {
 		t.Fatal("over-cap candidate lost deterministic score")
 	}

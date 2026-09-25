@@ -110,3 +110,19 @@ func TestPrefilterEmptyConstraintsPassAll(t *testing.T) {
 		t.Fatalf("empty constraints rejected: %q", got)
 	}
 }
+
+// TestContainsWordUTF8Boundary — the left edge must decode the rune
+// ENDING before the match. Decoding forward from j-1 lands on a
+// continuation byte, reads RuneError, and fakes a boundary — which let
+// "sony" match inside "lésony".
+func TestContainsWordUTF8Boundary(t *testing.T) {
+	// 'é' (U+00E9, 2 bytes) is a letter: a needle trailing it is not a
+	// word.
+	if containsWord("lésony audio", "sony") {
+		t.Fatal("needle after a multibyte letter matched as a word")
+	}
+	// '—' (U+2014, 3 bytes) is not a letter: the needle is a real word.
+	if !containsWord("casque—sony", "sony") {
+		t.Fatal("needle after a multibyte non-letter did not match")
+	}
+}

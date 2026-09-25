@@ -107,8 +107,8 @@ func checkAvailability(p extract.Product, c Constraints) string {
 
 // containsWord reports whether haystack (already lower-cased) contains
 // needle as a word-bounded term — "sony" matches "Sony headphones" but not
-// "Sonya". Boundaries are non-letter/non-digit positions or string edges;
-// needle must already be lower-cased.
+// "Sonya" or "lésony". Boundaries are non-letter/non-digit positions or
+// string edges; needle must already be lower-cased.
 func containsWord(haystack, needle string) bool {
 	if needle == "" {
 		return false
@@ -119,7 +119,7 @@ func containsWord(haystack, needle string) bool {
 			return false
 		}
 		j += i
-		if isBoundary(haystack, j-1) && isBoundary(haystack, j+len(needle)) {
+		if leftBoundary(haystack, j) && isBoundary(haystack, j+len(needle)) {
 			return true
 		}
 		i = j + 1
@@ -137,5 +137,18 @@ func isBoundary(s string, i int) bool {
 	if s[i] >= 0x80 {
 		r, _ = utf8.DecodeRuneInString(s[i:])
 	}
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+}
+
+// leftBoundary reports whether a match starting at byte j sits on a word
+// edge: start of string, or the rune ENDING just before j is non-letter/
+// non-digit. Decoding forward from j-1 can land on a continuation byte
+// and read RuneError — a false boundary that let "sony" match inside
+// "lésony".
+func leftBoundary(s string, j int) bool {
+	if j <= 0 {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(s[:j])
 	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }

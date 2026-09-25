@@ -3,6 +3,7 @@ package match
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"unicode"
@@ -104,6 +105,9 @@ type Plan struct {
 // call — a partial plan would silently drop part of the user's ask.
 func PlanCriteria(raw []string) (Plan, error) {
 	var plan Plan
+	// Duplicate subjective criteria would ask jeff the identical question
+	// twice — dedup on the sanitized text before they eat the budget.
+	seen := make(map[string]struct{}, len(raw))
 	for i, r := range raw {
 		c, err := sanitizeCriterion(r)
 		if err != nil {
@@ -115,6 +119,10 @@ func PlanCriteria(raw []string) (Plan, error) {
 			}
 			continue
 		}
+		if _, dup := seen[c]; dup {
+			continue
+		}
+		seen[c] = struct{}{}
 		if len(plan.Questions) >= maxQuestions {
 			return Plan{}, fmt.Errorf("criterion %d: %w", i, ErrTooManyCriteria)
 		}
@@ -180,8 +188,10 @@ func (c *Constraints) add(key, val string) error {
 
 func (c *Constraints) addPrice(key, val string) error {
 	f, err := strconv.ParseFloat(val, 64)
-	if err != nil || f < 0 {
-		return fmt.Errorf("%w: %s:%q is not a non-negative number", ErrInvalidConstraint, key, val)
+	// ParseFloat accepts "NaN"/"Inf" without error — a non-finite bound
+	// would silently no-op the constraint instead of rejecting loudly.
+	if err != nil || f < 0 || math.IsNaN(f) || math.IsInf(f, 0) {
+		return fmt.Errorf("%w: %s:%q is not a finite non-negative number", ErrInvalidConstraint, key, val)
 	}
 	if key == "price_max" {
 		c.PriceMax = &f
