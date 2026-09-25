@@ -14,6 +14,7 @@ import (
 	"github.com/anatolykoptev/go-mcpserver"
 	"github.com/anatolykoptev/go-product-search/internal/auth"
 	"github.com/anatolykoptev/go-product-search/internal/config"
+	"github.com/anatolykoptev/go-product-search/internal/search"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -57,7 +58,13 @@ func runMCPServer(cfg config.Config) error {
 		Name:    "go-product-search",
 		Version: version,
 	}, mcpConfig(cfg, []mcp.Middleware{hooks.Middleware()}, routes), func(_ *mcp.Server) {
-		// p2 registers product_search / product_match tools here.
+		// P2 sourcing stage: built at startup so misconfig (bad WOWA_URL,
+		// zero enabled adapters) surfaces in the log before the first tool
+		// call. P5 registers product_search / product_match tools on this
+		// server and hands them the searcher.
+		if _, err := search.New(cfg); err != nil {
+			slog.Error("sourcing stage init failed", slog.Any("error", err))
+		}
 	})
 }
 
