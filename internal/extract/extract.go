@@ -343,6 +343,17 @@ func isCFChallengeError(err error) bool {
 		strings.Contains(s, "cf_detected")
 }
 
+// renderTimeoutSecs gives the render tier more headroom than a plain fetch —
+// a CF challenge round-trip plus JS execution routinely outlives the 25s
+// fetch bound. Server clamps to 60.
+func renderTimeoutSecs(fetch int) int {
+	if t := fetch * 2; t > 60 {
+		return 60
+	} else {
+		return t
+	}
+}
+
 // renderDetail fetches the page through wowa /render (stealth Chrome) and
 // schema-merges the HTML. It consumes the same per-Enrich detail budget —
 // a render is a detail fetch — while the gate's page budget and domain
@@ -359,7 +370,8 @@ func (p *Pipeline) renderDetail(ctx context.Context, c sources.Candidate, prod *
 	}
 	resp, err := p.cfg.Render.Render(ctx, wowa.RenderRequest{
 		URL:         c.URL,
-		TimeoutSecs: p.cfg.FetchTimeoutSecs,
+		TimeoutSecs: renderTimeoutSecs(p.cfg.FetchTimeoutSecs),
+		Wait:        "domcontentloaded",
 	})
 	switch {
 	case errors.Is(err, sources.ErrPageBudgetExhausted),
