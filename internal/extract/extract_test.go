@@ -356,16 +356,20 @@ func (s *stubInteracter) Interact(context.Context, wowa.InteractRequest) (*wowa.
 		return nil, s.err
 	}
 	n := s.calls.Load()
-	var data []byte
+	var payload map[string]string
 	if n == 1 {
-		data, _ = json.Marshal(map[string]string{"h": s.dom, "click": s.click})
+		payload = map[string]string{"h": s.dom, "click": s.click}
 	} else {
 		h := s.dom2
 		if h == "" {
 			h = s.dom
 		}
-		data, _ = json.Marshal(map[string]string{"u": s.landed, "h": h})
+		payload = map[string]string{"u": s.landed, "h": h}
 	}
+	// Mirror the live wire shape: evaluate returns the script's value, so a
+	// JSON.stringify result arrives as a quoted JSON string, not an object.
+	inner, _ := json.Marshal(payload)
+	data, _ := json.Marshal(string(inner))
 	return &wowa.InteractResponse{Actions: []wowa.ActionResult{
 		{Action: "wait_for", Ok: true},
 		{Action: "evaluate", Ok: true, Data: data},
