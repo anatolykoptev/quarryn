@@ -35,6 +35,10 @@ type productMatchInput struct {
 type productResult struct {
 	URL     string `json:"url"`     // listing URL — needed to visit/buy the product
 	Adapter string `json:"adapter"` // adapter that sourced it (ebay/etsy/shopify/slickdeals)
+	// BuyURL is the resolved merchant URL captured when the interact tier
+	// followed the listing's outbound tracker (e.g. slickdeals /click →
+	// woot.com offer). Empty unless the solve tier resolved one.
+	BuyURL string `json:"buy_url,omitempty"`
 	extract.PublicProduct
 
 	Score      float64               `json:"score"`      // fused score, [0,1]

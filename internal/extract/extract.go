@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	neturl "net/url"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -411,10 +413,16 @@ func (p *Pipeline) renderDetail(ctx context.Context, c sources.Candidate, prod *
 // schemaMerge parses a fetched page body for schema.org Product data and
 // merges it into prod. Returns true when a product was merged.
 func (p *Pipeline) schemaMerge(c sources.Candidate, body string, prod *Product) bool {
-	sp, err := productFromSchema([]byte(body), c.URL)
+	return p.schemaMergeURL(c.URL, body, prod)
+}
+
+// schemaMergeURL parses body for schema.org Product data attributed to
+// pageURL and merges it into prod. Returns true when a product merged.
+func (p *Pipeline) schemaMergeURL(pageURL, body string, prod *Product) bool {
+	sp, err := productFromSchema([]byte(body), pageURL)
 	if err != nil || sp == nil {
 		slog.Debug("extract: no schema.org product",
-			slog.String("url", c.URL), slog.Any("error", err))
+			slog.String("url", pageURL), slog.Any("error", err))
 		return false
 	}
 	mergeMissing(prod, sp)
@@ -435,13 +443,17 @@ func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidat
 	if budget.Add(-1) < 0 {
 		return false
 	}
+	// Named session so the second call (outbound-link resolution) reuses
+	// the same cleared tab; destroyed at the end of each call.
+	session := fmt.Sprintf("prodsearch-%d", time.Now().UnixNano())
 	resp, err := p.cfg.Interact.Interact(ctx, wowa.InteractRequest{
 		URL:         c.URL,
 		AutoBypass:  true,
 		TimeoutSecs: 60,
+		Session:     session,
 		Actions: []wowa.Action{
 			{Type: "wait_for", WaitMs: 12000},
-			{Type: "evaluate", Script: "document.documentElement.outerHTML"},
+			{Type: "evaluate", Script: interactExtractJS},
 		},
 	})
 	if err != nil {
@@ -449,23 +461,115 @@ func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidat
 			slog.String("url", c.URL), slog.Any("error", err))
 		return false
 	}
+	got, click := interactPayload(resp)
+	merged := false
+	if got != "" {
+		if p.schemaMerge(c, got, prod) {
+			prod.Method = MethodInteract
+			merged = true
+		}
+		if og := ogDescription(got); og != "" && prod.Description == "" {
+			prod.Description = og
+		}
+	}
+	// Deal aggregators keep the buyable URL behind an outbound tracker
+	// (slickdeals /click). Follow it in-session — the merchant page may
+	// carry real Product schema the thread never had.
+	if click != "" && budget.Add(-1) >= 0 {
+		merged = p.interactOutbound(ctx, session, click, c, prod) || merged
+	}
+	return merged
+}
+
+// interactExtractJS returns the pieces worth shipping back from a cleared
+// page without hauling a megabyte DOM: <head> (JSON-LD/schema + og tags
+// live there) and the deal aggregator's outbound href when present.
+const interactExtractJS = `JSON.stringify({
+  h: document.head ? document.head.outerHTML.slice(0,400000) : "",
+  click: (document.querySelector('a[href*="/click?"]')||{}).href || ""
+})`
+
+// interactOutbound follows the captured tracker URL inside the same
+// session and schema-merges the merchant page it lands on. On success it
+// records the resolved merchant URL as BuyURL.
+func (p *Pipeline) interactOutbound(ctx context.Context, session, click string, c sources.Candidate, prod *Product) bool {
+	resp, err := p.cfg.Interact.Interact(ctx, wowa.InteractRequest{
+		URL:         c.URL,
+		TimeoutSecs: 45,
+		Session:     session,
+		Actions: []wowa.Action{
+			{Type: "navigate", URL: click},
+			{Type: "wait_for", WaitMs: 8000},
+			{Type: "evaluate", Script: `JSON.stringify({u:location.href,h:document.head?document.head.outerHTML.slice(0,400000):""})`},
+			{Type: "destroy_session"},
+		},
+	})
+	if err != nil {
+		slog.Warn("extract: outbound hop failed",
+			slog.String("url", c.URL), slog.Any("error", err))
+		return false
+	}
+	body, landed := interactPayload(resp)
+	if landed != "" && domainOf(landed) != domainOf(c.URL) {
+		if p.schemaMergeURL(landed, body, prod) {
+			prod.Method = MethodInteract
+			prod.BuyURL = cleanBuyURL(landed)
+			return true
+		}
+		// Merchant page had no schema either — still worth surfacing the
+		// resolved buy link.
+		prod.BuyURL = cleanBuyURL(landed)
+	}
+	return false
+}
+
+// interactPayload unwraps the evaluate JSON the tier's scripts emit:
+// "h" is the page head HTML, "u" the resolved location, "click" the
+// captured outbound tracker href.
+func interactPayload(resp *wowa.InteractResponse) (head, extra string) {
+	if resp == nil {
+		return "", ""
+	}
 	for _, a := range resp.Actions {
 		if a.Action != "evaluate" || !a.Ok {
 			continue
 		}
-		var body string
-		if json.Unmarshal(a.Data, &body) != nil || len(body) < 512 {
+		var payload struct {
+			H     string `json:"h"`
+			U     string `json:"u"`
+			Click string `json:"click"`
+		}
+		if json.Unmarshal(a.Data, &payload) != nil {
 			continue
 		}
-		if p.schemaMerge(c, body, prod) {
-			prod.Method = MethodInteract
-			return true
+		if payload.Click != "" {
+			extra = payload.Click
 		}
-		if og := ogDescription(body); og != "" && prod.Description == "" {
-			prod.Description = og
+		if payload.U != "" {
+			extra = payload.U
+		}
+		if len(payload.H) > len(head) {
+			head = payload.H
 		}
 	}
-	return false
+	return head, extra
+}
+
+// cleanBuyURL drops affiliate/tracking params from the resolved merchant
+// URL (cjdata/cjevent/utm_*) — the link stays valid and readable.
+func cleanBuyURL(raw string) string {
+	u, err := neturl.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	q := u.Query()
+	for k := range q {
+		if strings.HasPrefix(k, "utm_") || strings.HasPrefix(k, "cj") {
+			q.Del(k)
+		}
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // ogDescription pulls <meta property="og:description"> from a DOM — thread

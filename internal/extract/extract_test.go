@@ -342,9 +342,12 @@ func utf8Len(s string) int { return len([]rune(s)) }
 // stubInteracter is a hand-rolled Interacter counting calls; dom is the
 // DOM string the evaluate action returns.
 type stubInteracter struct {
-	calls atomic.Int64
-	dom   string
-	err   error
+	calls  atomic.Int64
+	dom    string // first page (thread) head HTML
+	dom2   string // second page (merchant) head HTML; falls back to dom
+	click  string // outbound tracker href the thread page yields
+	landed string // final URL after following the tracker
+	err    error
 }
 
 func (s *stubInteracter) Interact(context.Context, wowa.InteractRequest) (*wowa.InteractResponse, error) {
@@ -352,7 +355,17 @@ func (s *stubInteracter) Interact(context.Context, wowa.InteractRequest) (*wowa.
 	if s.err != nil {
 		return nil, s.err
 	}
-	data, _ := json.Marshal(s.dom)
+	n := s.calls.Load()
+	var data []byte
+	if n == 1 {
+		data, _ = json.Marshal(map[string]string{"h": s.dom, "click": s.click})
+	} else {
+		h := s.dom2
+		if h == "" {
+			h = s.dom
+		}
+		data, _ = json.Marshal(map[string]string{"u": s.landed, "h": h})
+	}
 	return &wowa.InteractResponse{Actions: []wowa.ActionResult{
 		{Action: "wait_for", Ok: true},
 		{Action: "evaluate", Ok: true, Data: data},
@@ -399,5 +412,38 @@ func TestEnrichInteractTopNGate(t *testing.T) {
 		// second candidate may still be rescued by the LLM stub — the gate
 		// assertion is on interact calls, not the outcome.
 		_ = out[1]
+	}
+}
+
+// TestEnrichInteractFollowsBuyLink: the thread page carries no Product
+// schema but exposes a /click tracker — the tier follows it and merges
+// the merchant page, recording the resolved buy URL.
+func TestEnrichInteractFollowsBuyLink(t *testing.T) {
+	f := &stubFetcher{err: errors.New("remote error (http 502): cloudflare managed_challenge_200")}
+	i := &stubInteracter{
+		dom:    `<head><title>thread</title></head>`,
+		click:  "https://slickdeals.net/click?sdtid=1",
+		landed: "https://electronics.woot.com/offers/speaker",
+	}
+	cfg := testConfig()
+	cfg.Interact = i
+	p := New(f, &stubExtractor{}, cfg)
+
+	// Second-call DOM carries the merchant schema.
+	i2dom := `<head><script type="application/ld+json">{"@type":"Product","name":"JBL Charge 6","offers":{"@type":"Offer","price":"95.96","priceCurrency":"USD"}}</script></head>`
+	i.dom2 = i2dom
+	_ = i
+
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		cand("https://slickdeals.net/f/1-deal", "", nil),
+	})
+	if i.calls.Load() != 2 {
+		t.Fatalf("interact calls = %d, want 2 (thread + outbound hop)", i.calls.Load())
+	}
+	if out[0].ExtractionFailed {
+		t.Fatalf("merchant page should rescue the candidate: %+v", out[0])
+	}
+	if out[0].Product.BuyURL == "" {
+		t.Fatalf("resolved buy url missing: %+v", out[0].Product)
 	}
 }
