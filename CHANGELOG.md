@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/anatolykoptev/go-product-search/compare/v1.2.0...v1.3.0) (2026-09-25)
+
+
+### Added
+
+* **extract:** resolve outbound merchant links for deal-aggregator cards ([#29](https://github.com/anatolykoptev/go-product-search/issues/29)) ([a7db03b](https://github.com/anatolykoptev/go-product-search/commit/a7db03b59a34f1b46a2a51d0f02b2a95db39cc58))
+
 ## [1.2.0](https://github.com/anatolykoptev/go-product-search/compare/v1.1.0...v1.2.0) (2026-09-25)
 
 
