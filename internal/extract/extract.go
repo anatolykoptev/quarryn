@@ -307,6 +307,14 @@ func (p *Pipeline) fetchDetail(ctx context.Context, c sources.Candidate, prod *P
 		// retry, never an error worth failing the search over.
 		return false, "over_budget"
 	case err != nil:
+		if isCFChallengeError(err) {
+			// Bot-wall answer surfaced as a transport error (wowa reports
+			// the challenge page's HTTP 200 as a remote 502) — escalate to
+			// the render tier exactly like a CFDetected body.
+			slog.Info("extract: detail fetch hit CF challenge, escalating to render",
+				slog.String("url", c.URL), slog.Any("error", err))
+			return true, ""
+		}
 		// wowa is down — the /extract fallback would fail identically.
 		slog.Warn("extract: detail fetch failed",
 			slog.String("url", c.URL), slog.Any("error", err))
@@ -322,6 +330,17 @@ func (p *Pipeline) fetchDetail(ctx context.Context, c sources.Candidate, prod *P
 		p.schemaMerge(c, resp.Body, prod)
 		return false, ""
 	}
+}
+
+// isCFChallengeError reports whether a wowa fetch error is a bot-management
+// challenge surfaced as a transport failure rather than a CFDetected body —
+// e.g. "remote error (http 502): cloudflare managed_challenge_200".
+func isCFChallengeError(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "cloudflare") ||
+		strings.Contains(s, "managed_challenge") ||
+		strings.Contains(s, "cf_challenge") ||
+		strings.Contains(s, "cf_detected")
 }
 
 // renderDetail fetches the page through wowa /render (stealth Chrome) and
