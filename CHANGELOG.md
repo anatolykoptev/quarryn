@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/anatolykoptev/go-product-search/compare/v1.3.3...v1.4.0) (2026-09-25)
+
+
+### Added
+
+* **extract:** surface silent outbound-hop exits ([#38](https://github.com/anatolykoptev/go-product-search/issues/38)) ([7527522](https://github.com/anatolykoptev/go-product-search/commit/7527522255871ac22a5e7598a1782afc6c6439e0))
+
 ## [1.3.3](https://github.com/anatolykoptev/go-product-search/compare/v1.3.2...v1.3.3) (2026-09-25)
 
 
