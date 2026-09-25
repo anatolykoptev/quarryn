@@ -207,7 +207,7 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 		// SERP-complete card on a deal aggregator: the product is usable
 		// as-is, but the buyable merchant link lives behind the thread's
 		// outbound tracker — resolve it when the interact budget allows.
-		p.tryInteract(ctx, rank, c, &prod, budget)
+		p.tryInteract(ctx, rank, c, &prod, budget, true)
 	}
 
 	if probs := prod.problems(); len(probs) > 0 {
@@ -298,7 +298,7 @@ func (p *Pipeline) extractDetail(ctx context.Context, rank int, c sources.Candid
 			if !declaredRender {
 				// Render could not clear the wall — try the live-session
 				// solve tier before spending an LLM call.
-				if p.tryInteract(ctx, rank, c, prod, budget) {
+				if p.tryInteract(ctx, rank, c, prod, budget, false) {
 					return ""
 				}
 				p.tryLLM(ctx, rank, c, prod, ec)
@@ -446,7 +446,7 @@ func (p *Pipeline) schemaMergeURL(pageURL, body string, prod *Product) bool {
 // a plain fetch. Gated to top-N funnel-ranked candidates like the LLM tier
 // (a session is expensive); counts against the detail budget. Returns true
 // when the recovered DOM merged product data.
-func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidate, prod *Product, budget *atomic.Int64) bool {
+func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidate, prod *Product, budget *atomic.Int64, wantOutbound bool) bool {
 	if p.cfg.Interact == nil || rank >= p.cfg.LLMTopN {
 		return false
 	}
@@ -462,7 +462,7 @@ func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidat
 		TimeoutSecs: 60,
 		Session:     session,
 		Actions: []wowa.Action{
-			{Type: "wait_for", WaitMs: 12000},
+			outboundWaitAction(wantOutbound),
 			{Type: "evaluate", Script: interactExtractJS},
 		},
 	})
@@ -482,10 +482,7 @@ func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidat
 			prod.Description = og
 		}
 	}
-	if got == "" && click == "" {
-		slog.Warn("extract: interact yielded no usable payload",
-			slog.String("url", c.URL))
-	}
+	reportInteractYield(c.URL, got, click, wantOutbound)
 	// Deal aggregators keep the buyable URL behind an outbound tracker
 	// (slickdeals /click). Follow it in-session — the merchant page may
 	// carry real Product schema the thread never had.
@@ -495,12 +492,40 @@ func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidat
 	return merged
 }
 
+func reportInteractYield(url, got, click string, wantOutbound bool) {
+	switch {
+	case got == "" && click == "":
+		slog.Warn("extract: interact yielded no usable payload",
+			slog.String("url", url))
+	case wantOutbound && click == "":
+		slog.Warn("extract: no outbound link on cleared page",
+			slog.String("url", url))
+	}
+}
+
 // interactExtractJS returns the pieces worth shipping back from a cleared
 // page without hauling a megabyte DOM: <head> (JSON-LD/schema + og tags
 // live there) and the deal aggregator's outbound href when present.
+func outboundWaitAction(wantOutbound bool) wowa.Action {
+	if !wantOutbound {
+		return wowa.Action{Type: "wait_for", WaitMs: 12000}
+	}
+	// Selector wait beats the fixed sleep on both axes: returns as soon as
+	// the cleared deal box renders, tolerates slow solves up to 25s, and a
+	// miss must not abort the evaluate (skip_on_error keeps the chain).
+	return wowa.Action{
+		Type:        "wait_for",
+		Selector:    `a[href*="/click?"]`,
+		TimeoutMs:   25000,
+		SkipOnError: true,
+	}
+}
+
 const interactExtractJS = `JSON.stringify({
   h: document.head ? document.head.outerHTML.slice(0,400000) : "",
-  click: (document.querySelector('a[href*="/click?"]')||{}).href || ""
+  click: (document.querySelector('a[href*="/click?"][href*="Get+Deal"]')
+       || document.querySelector('a[href*="/click?"][href*="Main+CTA"]')
+       || document.querySelector('a[href*="/click?"]')||{}).href || ""
 })`
 
 // interactOutbound follows the captured tracker URL inside the same
