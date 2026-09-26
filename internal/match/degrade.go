@@ -29,43 +29,43 @@ import (
 //	over_candidate_cap — eligible but beyond MaxJeffCandidates (a budget
 //	                     decision — does NOT set Result.Degraded)
 const (
-	reasonSaturated    = "jeff_saturated"
-	reasonUnavailable  = "jeff_unavailable"
-	reasonTimeout      = "jeff_timeout"
-	reasonHTTPError    = "jeff_http_error"
-	reasonNoAnswer     = "jeff_no_answer"
-	reasonUnconfigured = "jeff_unconfigured"
-	reasonCtxDeadline  = "ctx_deadline"
-	reasonOverCap      = "over_candidate_cap"
+	ReasonJeffSaturated    ReasonCode = "jeff_saturated"
+	ReasonJeffUnavailable  ReasonCode = "jeff_unavailable"
+	ReasonJeffTimeout      ReasonCode = "jeff_timeout"
+	ReasonJeffHTTPError    ReasonCode = "jeff_http_error"
+	ReasonJeffNoAnswer     ReasonCode = "jeff_no_answer"
+	ReasonJeffUnconfigured ReasonCode = "jeff_unconfigured"
+	ReasonCtxDeadline      ReasonCode = "ctx_deadline"
+	ReasonOverCandidateCap ReasonCode = "over_candidate_cap"
 )
 
 // classifyJeffError maps a jeff call failure to its degrade reason.
 // parentCtx distinguishes "our per-call deadline fired" (jeff_timeout)
 // from "the caller's ctx died mid-flight" (ctx_deadline).
-func classifyJeffError(err error, parentCtx context.Context) string {
+func classifyJeffError(err error, parentCtx context.Context) ReasonCode {
 	var se *jeff.StatusError
 	switch {
 	case errors.As(err, &se):
 		if se.StatusCode == 429 || se.StatusCode == 529 {
-			return reasonSaturated
+			return ReasonJeffSaturated
 		}
 		if se.StatusCode >= 500 {
-			return reasonUnavailable
+			return ReasonJeffUnavailable
 		}
-		return reasonHTTPError
+		return ReasonJeffHTTPError
 	case errors.Is(err, jeff.ErrNoAnswer):
-		return reasonNoAnswer
+		return ReasonJeffNoAnswer
 	case isDeadline(err):
 		if parentCtx.Err() != nil {
-			return reasonCtxDeadline
+			return ReasonCtxDeadline
 		}
-		return reasonTimeout
+		return ReasonJeffTimeout
 	case errors.Is(err, context.Canceled):
-		return reasonCtxDeadline
+		return ReasonCtxDeadline
 	default:
 		// Transport failure, decode error, DNS — jeff is unreachable or
 		// speaking garbage; both are service-side unavailability.
-		return reasonUnavailable
+		return ReasonJeffUnavailable
 	}
 }
 
@@ -81,11 +81,11 @@ func isDeadline(err error) bool {
 
 // markUnjudged flags one candidate as not-jeff-judged and counts the
 // degrade. Writes only res.Candidates[idx] — disjoint per goroutine.
-func (m *Matcher) markUnjudged(res *Result, idx int, reason string) {
+func (m *Matcher) markUnjudged(res *Result, idx int, reason ReasonCode) {
 	jc := &res.Candidates[idx]
 	jc.UnjudgedReason = reason
 	switch reason {
-	case reasonOverCap, reasonUnconfigured:
+	case ReasonOverCandidateCap, ReasonJeffUnconfigured:
 		// jeff was never owed a verdict (budget cap / degrade-mode
 		// matcher) — Passed keeps its prefilter outcome.
 	default:
@@ -93,7 +93,7 @@ func (m *Matcher) markUnjudged(res *Result, idx int, reason string) {
 		jc.Passed = false
 	}
 	if isDegradeTrigger(reason) {
-		jeffDegradedTotal.WithLabelValues(reason).Inc()
+		jeffDegradedTotal.WithLabelValues(string(reason)).Inc()
 	}
 }
 
@@ -102,9 +102,9 @@ func (m *Matcher) markUnjudged(res *Result, idx int, reason string) {
 // Result.Degraded. over_candidate_cap is a budget decision and
 // ctx_deadline is the caller's own cancellation: data, not service
 // failures.
-func isDegradeTrigger(reason string) bool {
+func isDegradeTrigger(reason ReasonCode) bool {
 	switch reason {
-	case "", reasonOverCap, reasonCtxDeadline:
+	case "", ReasonOverCandidateCap, ReasonCtxDeadline:
 		return false
 	}
 	return true
@@ -115,7 +115,7 @@ func isDegradeTrigger(reason string) bool {
 // Any jeff-side failure sets Degraded + a counted reason and warns once
 // per Match call (ADR-5: degradation is loud).
 func summarizeDegrade(res *Result) {
-	counts := map[string]int{}
+	counts := map[ReasonCode]int{}
 	unjudged := 0
 	for _, jc := range res.Candidates {
 		r := jc.UnjudgedReason
@@ -129,7 +129,7 @@ func summarizeDegrade(res *Result) {
 		return
 	}
 	// Dominant reason first for a stable, readable summary.
-	reasons := make([]string, 0, len(counts))
+	reasons := make([]ReasonCode, 0, len(counts))
 	for r := range counts {
 		reasons = append(reasons, r)
 	}
@@ -144,7 +144,7 @@ func summarizeDegrade(res *Result) {
 		"reason", reasons[0], "unjudged", unjudged, "detail", joinCounts(counts, reasons))
 }
 
-func joinCounts(counts map[string]int, reasons []string) string {
+func joinCounts(counts map[ReasonCode]int, reasons []ReasonCode) string {
 	parts := make([]string, 0, len(reasons))
 	for _, r := range reasons {
 		parts = append(parts, fmt.Sprintf("%s=%d", r, counts[r]))

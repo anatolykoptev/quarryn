@@ -1,6 +1,7 @@
 package match
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -8,101 +9,111 @@ import (
 	"github.com/anatolykoptev/go-product-search/internal/extract"
 )
 
+// ReasonCode is the stable machine-readable vocabulary carried on
+// JudgedCandidate reasons — consumers key on the code, never on the prose
+// detail (the northcinder {code, detail} split).
+type ReasonCode string
+
 // Exclusion reason vocabulary — a bounded set safe for metric labels. The
-// human-facing ExcludeReason may carry more detail; the metric label is
-// always one of these.
+// human-facing ExcludeDetail may carry more detail; the metric label and
+// the JSON field are always one of these.
 const (
-	exclMissingPrice         = "missing_price"
-	exclPriceAboveMax        = "price_above_max"
-	exclPriceBelowMin        = "price_below_min"
-	exclCurrencyMismatch     = "currency_mismatch"
-	exclBrandMissing         = "brand_missing"
-	exclBrandExcluded        = "brand_excluded"
-	exclKeywordMissing       = "keyword_missing"
-	exclKeywordExcluded      = "keyword_excluded"
-	exclAvailabilityMismatch = "availability_mismatch"
-	exclExtractionFailed     = "extraction_failed"
-	exclDeferredRender       = "deferred_render"
+	ExclMissingPrice         ReasonCode = "missing_price"
+	ExclPriceAboveMax        ReasonCode = "price_above_max"
+	ExclPriceBelowMin        ReasonCode = "price_below_min"
+	ExclCurrencyMismatch     ReasonCode = "currency_mismatch"
+	ExclBrandMissing         ReasonCode = "brand_missing"
+	ExclBrandExcluded        ReasonCode = "brand_excluded"
+	ExclKeywordMissing       ReasonCode = "keyword_missing"
+	ExclKeywordExcluded      ReasonCode = "keyword_excluded"
+	ExclAvailabilityMismatch ReasonCode = "availability_mismatch"
+	ExclExtractionFailed     ReasonCode = "extraction_failed"
+	ExclDeferredRender       ReasonCode = "deferred_render"
 )
 
 // checkCandidate runs the deterministic constraints against one enriched
-// candidate's product (ADR-3): every constraint must hold. It returns ""
-// on pass, otherwise the bounded exclusion reason.
-func checkCandidate(p extract.Product, c Constraints) string {
+// candidate's product (ADR-3): every constraint must hold. It returns the
+// zero code on pass, otherwise the bounded exclusion reason plus a detail
+// naming the offending value.
+func checkCandidate(p extract.Product, c Constraints) (ReasonCode, string) {
 	if c.empty() {
-		return ""
+		return "", ""
 	}
-	if r := checkPrice(p, c); r != "" {
-		return r
+	if r, d := checkPrice(p, c); r != "" {
+		return r, d
 	}
-	if r := checkCurrency(p, c); r != "" {
-		return r
+	if r, d := checkCurrency(p, c); r != "" {
+		return r, d
 	}
-	if r := checkTerms(p, c); r != "" {
-		return r
+	if r, d := checkTerms(p, c); r != "" {
+		return r, d
 	}
 	return checkAvailability(p, c)
 }
 
 // checkPrice applies the bounds. A product without a price cannot prove it
 // satisfies a bound — excluded, not waved through.
-func checkPrice(p extract.Product, c Constraints) string {
+func checkPrice(p extract.Product, c Constraints) (ReasonCode, string) {
 	if c.PriceMin == nil && c.PriceMax == nil {
-		return ""
+		return "", ""
 	}
 	if p.Price == nil {
-		return exclMissingPrice
+		return ExclMissingPrice, "product carries no price"
 	}
 	if c.PriceMax != nil && *p.Price > *c.PriceMax {
-		return exclPriceAboveMax
+		return ExclPriceAboveMax, fmt.Sprintf("price %.2f > max %.2f", *p.Price, *c.PriceMax)
 	}
 	if c.PriceMin != nil && *p.Price < *c.PriceMin {
-		return exclPriceBelowMin
+		return ExclPriceBelowMin, fmt.Sprintf("price %.2f < min %.2f", *p.Price, *c.PriceMin)
 	}
-	return ""
+	return "", ""
 }
 
 // checkCurrency compares against the extract-normalized ISO code; extract
 // already canonicalized, so a residual mismatch is a real mismatch.
-func checkCurrency(p extract.Product, c Constraints) string {
+func checkCurrency(p extract.Product, c Constraints) (ReasonCode, string) {
 	if c.Currency != "" && !strings.EqualFold(p.Currency, c.Currency) {
-		return exclCurrencyMismatch
+		return ExclCurrencyMismatch, fmt.Sprintf("currency %q != required %q", p.Currency, c.Currency)
 	}
-	return ""
+	return "", ""
 }
 
 // checkTerms applies brand and keyword must/must-not lists as
 // case-insensitive word-boundary matches against the product's searchable
 // text (name + description).
-func checkTerms(p extract.Product, c Constraints) string {
+func checkTerms(p extract.Product, c Constraints) (ReasonCode, string) {
 	text := strings.ToLower(p.Name + " " + p.Description)
 	// want=true: term must appear; want=false: term must not appear.
 	for _, rule := range []struct {
 		terms  []string
 		want   bool
-		reason string
+		kind   string
+		reason ReasonCode
 	}{
-		{c.BrandsInclude, true, exclBrandMissing},
-		{c.BrandsExclude, false, exclBrandExcluded},
-		{c.KeywordsMust, true, exclKeywordMissing},
-		{c.KeywordsMustNot, false, exclKeywordExcluded},
+		{c.BrandsInclude, true, "brand", ExclBrandMissing},
+		{c.BrandsExclude, false, "brand", ExclBrandExcluded},
+		{c.KeywordsMust, true, "keyword", ExclKeywordMissing},
+		{c.KeywordsMustNot, false, "keyword", ExclKeywordExcluded},
 	} {
 		for _, term := range rule.terms {
 			if containsWord(text, term) != rule.want {
-				return rule.reason
+				if rule.want {
+					return rule.reason, fmt.Sprintf("required %s %q absent", rule.kind, term)
+				}
+				return rule.reason, fmt.Sprintf("excluded %s %q present", rule.kind, term)
 			}
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // checkAvailability requires an exact canonical-enum match; a product
 // with unknown availability fails a stated availability constraint.
-func checkAvailability(p extract.Product, c Constraints) string {
+func checkAvailability(p extract.Product, c Constraints) (ReasonCode, string) {
 	if c.Availability != "" && p.Availability != c.Availability {
-		return exclAvailabilityMismatch
+		return ExclAvailabilityMismatch, fmt.Sprintf("availability %q != required %q", p.Availability, c.Availability)
 	}
-	return ""
+	return "", ""
 }
 
 // containsWord reports whether haystack (already lower-cased) contains

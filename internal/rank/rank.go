@@ -92,8 +92,9 @@ type Result struct {
 	Confidence      score.ConfidenceLevel `json:"confidence"`
 	MatchedCriteria []CriterionVerdict    `json:"matched_criteria,omitempty"`
 	DealSignals     *DealSignals          `json:"deal_signals,omitempty"`
-	ExcludedReason  string                `json:"excluded_reason,omitempty"`
-	UnjudgedReason  string                `json:"unjudged_reason,omitempty"`
+	ExcludedReason  match.ReasonCode      `json:"excluded_reason,omitempty"`
+	ExcludedDetail  string                `json:"excluded_detail,omitempty"`
+	UnjudgedReason  match.ReasonCode      `json:"unjudged_reason,omitempty"`
 }
 
 // Rank fuses the signals and returns the ordered results: non-excluded
@@ -113,6 +114,7 @@ func Rank(cands []match.JudgedCandidate, questions []match.Question, degraded bo
 			Judged:          jc,
 			MatchedCriteria: explainCriteria(jc, questions, passMin),
 			ExcludedReason:  jc.ExcludeReason,
+			ExcludedDetail:  jc.ExcludeDetail,
 			UnjudgedReason:  jc.UnjudgedReason,
 		}
 		if ds := dealSignalsOf(jc); !ds.empty() {

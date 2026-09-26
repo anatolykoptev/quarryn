@@ -76,7 +76,8 @@ func project(r rank.Result) productResult {
 		Passed:          jc.Passed,
 		MatchedCriteria: r.MatchedCriteria,
 		DealSignals:     r.DealSignals,
-		ExcludedReason:  r.ExcludedReason,
-		UnjudgedReason:  r.UnjudgedReason,
+		ExcludedReason:  string(r.ExcludedReason),
+		ExcludedDetail:  r.ExcludedDetail,
+		UnjudgedReason:  string(r.UnjudgedReason),
 	}
 }
