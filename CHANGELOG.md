@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/anatolykoptev/go-product-search/compare/v1.5.0...v1.6.0) (2026-09-26)
+
+
+### Added
+
+* **extract:** charge browser budget per resolution ([#43](https://github.com/anatolykoptev/go-product-search/issues/43)) ([e279535](https://github.com/anatolykoptev/go-product-search/commit/e27953547ec042baca52006a44175570f87ecdeb))
+
 ## [1.5.0](https://github.com/anatolykoptev/go-product-search/compare/v1.4.0...v1.5.0) (2026-09-26)
 
 
