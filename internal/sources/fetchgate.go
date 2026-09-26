@@ -202,7 +202,7 @@ func NewFetchGate(fetch Fetcher, render Renderer, interact Interacter, stage str
 // domain returns ErrDomainThrottled without touching the wire.
 func (g *FetchGate) Fetch(ctx context.Context, req wowa.FetchRequest) (*wowa.FetchResponse, error) {
 	var resp *wowa.FetchResponse
-	err := g.run(ctx, req.URL, func() (int, error) {
+	err := g.run(ctx, req.URL, true, func() (int, error) {
 		r, err := g.fetch.Fetch(ctx, req)
 		if r != nil {
 			resp = r
@@ -228,7 +228,7 @@ func (g *FetchGate) Interact(ctx context.Context, req wowa.InteractRequest) (*wo
 		return nil, errors.New("sources: interact requested but no interacter wired")
 	}
 	var resp *wowa.InteractResponse
-	err := g.run(ctx, req.URL, func() (int, error) {
+	err := g.run(ctx, req.URL, false, func() (int, error) {
 		r, err := g.interact.Interact(ctx, req)
 		if r != nil {
 			resp = r
@@ -248,7 +248,7 @@ func (g *FetchGate) Render(ctx context.Context, req wowa.RenderRequest) (*wowa.R
 		return nil, errors.New("sources: render requested but no renderer wired")
 	}
 	var resp *wowa.RenderResponse
-	err := g.run(ctx, req.URL, func() (int, error) {
+	err := g.run(ctx, req.URL, true, func() (int, error) {
 		r, err := g.render.Render(ctx, req)
 		if r != nil {
 			resp = r
@@ -270,7 +270,10 @@ func (g *FetchGate) Render(ctx context.Context, req wowa.RenderRequest) (*wowa.R
 // run is the shared gate loop: skip → pace → budget → call → classify →
 // back off or return. call reports the upstream page status (0 when the
 // call errored before a page status existed) plus the call error.
-func (g *FetchGate) run(ctx context.Context, rawURL string, call func() (int, error)) error {
+// charge=false keeps pacing + backoff but skips the page budget — used
+// by interact sessions, which are bounded by their own browser budget
+// (an expensive 30-60s Chrome session is not a page fetch).
+func (g *FetchGate) run(ctx context.Context, rawURL string, charge bool, call func() (int, error)) error {
 	domain := gateDomain(rawURL)
 	budget := PageBudgetFrom(ctx)
 	if budget.domainSkipped(domain) {
@@ -283,7 +286,7 @@ func (g *FetchGate) run(ctx context.Context, rawURL string, call func() (int, er
 				return err
 			}
 		}
-		if !budget.TryConsume() {
+		if charge && !budget.TryConsume() {
 			// The page budget is the true stop reason — even mid-retry —
 			// because "rank what exists" is the required disposition.
 			return ErrPageBudgetExhausted
