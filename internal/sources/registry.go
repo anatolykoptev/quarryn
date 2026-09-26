@@ -30,6 +30,12 @@ type RegistryConfig struct {
 	SlickdealsFeedURL string // test override; empty → slickdeals.net feed
 
 	ShopifyShops []string // SHOPIFY_SHOPS, comma-separated shop domains
+	// ShopifyUCPProfileURL enables the Shopify UCP MCP legs (SHOPIFY_UCP_PROFILE_URL).
+	ShopifyUCPProfileURL string
+	// ShopifyUCPGlobalURL overrides the Global Catalog endpoint (tests).
+	ShopifyUCPGlobalURL string
+	// ShopifyUCPGlobalOff disables the global-catalog leg (SHOPIFY_UCP_GLOBAL=0).
+	ShopifyUCPGlobalOff bool
 }
 
 // RegistryConfigFromEnv resolves adapter configuration from the
@@ -37,13 +43,16 @@ type RegistryConfig struct {
 // to adapters.
 func RegistryConfigFromEnv(fetcher Fetcher, httpClient *http.Client) RegistryConfig {
 	return RegistryConfig{
-		Fetcher:          fetcher,
-		HTTP:             httpClient,
-		EBayClientID:     env.Str("EBAY_CLIENT_ID", ""),
-		EBayClientSecret: env.Str("EBAY_CLIENT_SECRET", ""),
-		EtsyAPIKey:       env.Str("ETSY_API_KEY", ""),
-		EtsySharedSecret: env.Str("ETSY_SHARED_SECRET", ""),
-		ShopifyShops:     env.List("SHOPIFY_SHOPS", ""),
+		Fetcher:              fetcher,
+		HTTP:                 httpClient,
+		EBayClientID:         env.Str("EBAY_CLIENT_ID", ""),
+		EBayClientSecret:     env.Str("EBAY_CLIENT_SECRET", ""),
+		EtsyAPIKey:           env.Str("ETSY_API_KEY", ""),
+		EtsySharedSecret:     env.Str("ETSY_SHARED_SECRET", ""),
+		ShopifyShops:         env.List("SHOPIFY_SHOPS", ""),
+		ShopifyUCPProfileURL: env.Str("SHOPIFY_UCP_PROFILE_URL", ""),
+		ShopifyUCPGlobalURL:  env.Str("SHOPIFY_UCP_GLOBAL_URL", ""),
+		ShopifyUCPGlobalOff:  !env.Bool("SHOPIFY_UCP_GLOBAL", true),
 	}
 }
 
@@ -63,6 +72,11 @@ func NewRegistry(cfg RegistryConfig) map[string]Adapter {
 		"ebay":       NewEBay(cfg.EBayClientID, cfg.EBayClientSecret, cfg.EBayBaseURL, hc),
 		"etsy":       NewEtsy(cfg.EtsyAPIKey, cfg.EtsySharedSecret, cfg.EtsyBaseURL, hc),
 		"slickdeals": NewSlickdeals(cfg.Fetcher, cfg.SlickdealsFeedURL),
-		"shopify":    NewShopify(cfg.Fetcher, cfg.ShopifyShops),
+		"shopify": NewShopify(cfg.Fetcher, ShopifyConfig{
+			Shops:      cfg.ShopifyShops,
+			ProfileURL: cfg.ShopifyUCPProfileURL,
+			GlobalURL:  cfg.ShopifyUCPGlobalURL,
+			GlobalOff:  cfg.ShopifyUCPGlobalOff,
+		}),
 	}
 }

@@ -72,7 +72,7 @@ func TestShopifyMultiShopSearch(t *testing.T) {
 	srv, wc, gotURLs := newShopifyWowa(t)
 	defer srv.Close()
 
-	a := NewShopify(wc, []string{"https://shop-one.example.com/", "shop-two.example.com"})
+	a := NewShopify(wc, ShopifyConfig{Shops: []string{"https://shop-one.example.com/", "shop-two.example.com"}})
 	if !a.Enabled() {
 		t.Fatal("adapter with fetcher+shops must be enabled")
 	}
@@ -116,7 +116,7 @@ func TestShopifyQueryFilter(t *testing.T) {
 	srv, wc, _ := newShopifyWowa(t)
 	defer srv.Close()
 
-	a := NewShopify(wc, []string{"shop-one.example.com"})
+	a := NewShopify(wc, ShopifyConfig{Shops: []string{"shop-one.example.com"}})
 	res, err := a.Search(t.Context(), sources.Query{Text: "spork"})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
@@ -127,13 +127,13 @@ func TestShopifyQueryFilter(t *testing.T) {
 }
 
 func TestShopifyDisabled(t *testing.T) {
-	if NewShopify(nil, []string{"x.example.com"}).Enabled() {
+	if NewShopify(nil, ShopifyConfig{Shops: []string{"x.example.com"}}).Enabled() {
 		t.Fatal("no fetcher must disable")
 	}
-	if NewShopify(stubFetcher{}, nil).Enabled() {
+	if NewShopify(stubFetcher{}, ShopifyConfig{Shops: nil}).Enabled() {
 		t.Fatal("no shops must disable")
 	}
-	if _, err := NewShopify(nil, nil).Search(t.Context(), sources.Query{Text: "x"}); err == nil {
+	if _, err := NewShopify(nil, ShopifyConfig{Shops: nil}).Search(t.Context(), sources.Query{Text: "x"}); err == nil {
 		t.Fatal("Search on disabled adapter must error")
 	}
 }
@@ -147,7 +147,7 @@ func TestShopifyPartialFailure(t *testing.T) {
 	defer srv.Close()
 	wc, _ := wowa.NewClient(srv.URL)
 
-	a := NewShopify(wc, []string{"bad.example.com", "good.example.com"})
+	a := NewShopify(wc, ShopifyConfig{Shops: []string{"bad.example.com", "good.example.com"}})
 	res, err := a.Search(t.Context(), sources.Query{Text: ""})
 	if err != nil {
 		t.Fatalf("one failing shop must not error the adapter: %v", err)
@@ -161,7 +161,7 @@ func TestShopifyMultiTokenQuery(t *testing.T) {
 	srv, wc, _ := newShopifyWowa(t)
 	defer srv.Close()
 
-	a := NewShopify(wc, []string{"shop-one.example.com"})
+	a := NewShopify(wc, ShopifyConfig{Shops: []string{"shop-one.example.com"}})
 
 	// Tokens need not be adjacent: vendor "Campware" + title word "Mug".
 	res, err := a.Search(t.Context(), sources.Query{Text: "campware mug"})
