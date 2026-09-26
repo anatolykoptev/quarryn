@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/anatolykoptev/go-product-search/compare/v1.6.0...v1.6.1) (2026-09-26)
+
+
+### Fixed
+
+* **sources:** interact calls keep pacing but skip the page budget ([#45](https://github.com/anatolykoptev/go-product-search/issues/45)) ([d4c5eee](https://github.com/anatolykoptev/go-product-search/commit/d4c5eeed8f5f32b18ea1559ab88fc9fd0ef13d35))
+
 ## [1.6.0](https://github.com/anatolykoptev/go-product-search/compare/v1.5.0...v1.6.0) (2026-09-26)
 
 
