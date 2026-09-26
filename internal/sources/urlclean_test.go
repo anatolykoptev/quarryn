@@ -30,6 +30,12 @@ func TestCleanTrackingURLDenylist(t *testing.T) {
 			"https://m.example.com/o?cjdata=MXx8&cjevent=x&irclickid=y&aff_id=1&aff=2&affiliate=z",
 			"https://m.example.com/o",
 		},
+		{
+			// live-observed shape: google ads attribution riding a
+			// slickdeals-resolved merchant URL (#68)
+			"https://electronics.woot.com/offers/x?gad_campaignid=869612314&gad_source=1&srsltid=abc",
+			"https://electronics.woot.com/offers/x",
+		},
 	}
 	for _, tc := range cases {
 		if got := CleanTrackingURL(tc.in); got != tc.want {
@@ -76,5 +82,27 @@ func TestFunnelCleansCandidateURLs(t *testing.T) {
 	}
 	if got != "http://203.0.113.10/f/999-deal" {
 		t.Fatalf("URL = %q, want tracker-free", got)
+	}
+}
+
+// TestIsTrackingParamPrefixes — tracker namespaces (hsa_*, mtm_*, utm_*)
+// strip by prefix so vendors can't evade the list by renaming the suffix;
+// lookalike functional keys must not be eaten.
+func TestIsTrackingParamPrefixes(t *testing.T) {
+	for _, k := range []string{"gad_source", "gad_campaignid", "srsltid",
+		"li_fat_id", "epik", "yclid", "spm", "pk_campaign", "pk_cid",
+		"HSX_X", "hsa_src", "MTM_medium", "utm_creative"} {
+		lk := k
+		if lk == "HSX_X" {
+			continue // hsa_ lookalike — must NOT match
+		}
+		if !IsTrackingParam(k) {
+			t.Errorf("IsTrackingParam(%q) = false, want true", k)
+		}
+	}
+	for _, k := range []string{"variant", "size", "HSX_X", "keywords", "refine"} {
+		if IsTrackingParam(k) {
+			t.Errorf("IsTrackingParam(%q) = true, want false", k)
+		}
 	}
 }
