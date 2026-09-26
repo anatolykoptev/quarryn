@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/anatolykoptev/go-product-search/compare/v1.9.0...v1.10.0) (2026-09-26)
+
+
+### Added
+
+* **extract:** minor-unit money representation ([85ae0ee](https://github.com/anatolykoptev/go-product-search/commit/85ae0ee76905261825f93271ab5239b6da0982a9)), closes [#49](https://github.com/anatolykoptev/go-product-search/issues/49)
+
 ## [1.9.0](https://github.com/anatolykoptev/go-product-search/compare/v1.8.0...v1.9.0) (2026-09-26)
 
 
