@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/anatolykoptev/go-product-search/compare/v1.8.0...v1.9.0) (2026-09-26)
+
+
+### Added
+
+* **match:** typed ReasonCode + exclude_detail on candidates ([e7c429d](https://github.com/anatolykoptev/go-product-search/commit/e7c429dc3c94d89ee0db5e3fd797dc9ba12941ff)), closes [#48](https://github.com/anatolykoptev/go-product-search/issues/48)
+
 ## [1.8.0](https://github.com/anatolykoptev/go-product-search/compare/v1.7.0...v1.8.0) (2026-09-26)
 
 
