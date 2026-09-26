@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	neturl "net/url"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -632,20 +631,9 @@ func interactPayload(resp *wowa.InteractResponse) (head, extra string) {
 }
 
 // cleanBuyURL drops affiliate/tracking params from the resolved merchant
-// URL (cjdata/cjevent/utm_*) — the link stays valid and readable.
+// URL via the shared denylist — the link stays valid and readable.
 func cleanBuyURL(raw string) string {
-	u, err := neturl.Parse(raw)
-	if err != nil {
-		return raw
-	}
-	q := u.Query()
-	for k := range q {
-		if strings.HasPrefix(k, "utm_") || strings.HasPrefix(k, "cj") {
-			q.Del(k)
-		}
-	}
-	u.RawQuery = q.Encode()
-	return u.String()
+	return sources.CleanTrackingURL(raw)
 }
 
 // ogDescription pulls <meta property="og:description"> from a DOM — thread
