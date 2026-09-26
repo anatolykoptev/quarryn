@@ -13,6 +13,7 @@ package extract
 import (
 	"encoding/json"
 
+	"github.com/anatolykoptev/go-product-search/internal/money"
 	"github.com/anatolykoptev/go-product-search/internal/sources"
 )
 
@@ -39,8 +40,8 @@ const (
 type Product struct {
 	Name         string   `json:"name"`
 	URL          string   `json:"url"`
-	Price        *float64 `json:"price,omitempty"`
-	Currency     string   `json:"currency,omitempty"` // ISO 4217
+	PriceMinor   *int64   `json:"price_minor,omitempty"` // minor units in Currency
+	Currency     string   `json:"currency,omitempty"`    // ISO 4217
 	Availability string   `json:"availability,omitempty"`
 	Condition    string   `json:"condition,omitempty"`
 	SellerName   string   `json:"seller_name,omitempty"`
@@ -97,7 +98,8 @@ const PublicBlurbMax = 500
 // candidate without leaking seller-identifying text.
 type PublicProduct struct {
 	Name             string   `json:"name"`
-	Price            *float64 `json:"price,omitempty"`
+	Price            *float64 `json:"price,omitempty"`       // decimal, display/compat
+	PriceMinor       *int64   `json:"price_minor,omitempty"` // minor units in Currency
 	Currency         string   `json:"currency,omitempty"`
 	Availability     string   `json:"availability,omitempty"`
 	Condition        string   `json:"condition,omitempty"`
@@ -112,7 +114,8 @@ type PublicProduct struct {
 func (p Product) ProductPublic() PublicProduct {
 	return PublicProduct{
 		Name:             p.Name,
-		Price:            p.Price,
+		Price:            money.DecimalPtr(p.PriceMinor, p.Currency),
+		PriceMinor:       p.PriceMinor,
 		Currency:         p.Currency,
 		Availability:     p.Availability,
 		Condition:        p.Condition,

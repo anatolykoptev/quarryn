@@ -226,8 +226,8 @@ func TestCandidateDecodeLiftsTypedFields(t *testing.T) {
 		MetaAvailability: AvailabilityInStock,
 		MetaSeller:       "seller-1",
 	})
-	if c.Price == nil || *c.Price != 19.99 {
-		t.Fatalf("price = %v", c.Price)
+	if c.PriceMinor == nil || *c.PriceMinor != 1999 {
+		t.Fatalf("price = %v", c.PriceMinor)
 	}
 	if c.Currency != "USD" || c.Condition != "NEW" || c.Availability != AvailabilityInStock ||
 		c.Seller != "seller-1" || c.Source != "a" {
@@ -259,7 +259,7 @@ func TestCandidateDecodeKeepsMalformedNumbers(t *testing.T) {
 		Title: "t", URL: "http://x",
 		Metadata: map[string]string{MetaPrice: "call-for-price"},
 	})
-	if c.Price != nil {
+	if c.PriceMinor != nil {
 		t.Fatal("unparseable price must not become a typed field")
 	}
 	if c.Metadata[MetaPrice] != "call-for-price" {

@@ -160,7 +160,7 @@ func assertSchemaEnriched(t *testing.T, got extract.EnrichedCandidate) {
 	if got.ExtractionFailed {
 		t.Fatalf("extraction failed: %s", got.FailureReason)
 	}
-	if got.Product.Price == nil || *got.Product.Price != 249.99 {
+	if got.Product.PriceMinor == nil || *got.Product.PriceMinor != 24999 {
 		t.Fatalf("schema fill missing: %+v", got.Product)
 	}
 	if got.Product.Currency != "USD" || got.Product.Method != "schema" {

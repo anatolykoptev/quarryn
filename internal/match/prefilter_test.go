@@ -9,10 +9,12 @@ import (
 
 func f64(v float64) *float64 { return &v }
 
+func iminor(v int64) *int64 { return &v }
+
 func baseProduct() extract.Product {
 	return extract.Product{
 		Name:         "Sony WH-1000XM5 Wireless Headphones",
-		Price:        f64(299.99),
+		PriceMinor:   iminor(29999),
 		Currency:     "USD",
 		Availability: "in_stock",
 		Condition:    "new",
@@ -46,7 +48,7 @@ func TestPrefilterPriceBounds(t *testing.T) {
 		t.Fatalf("in-range rejected: %q", got)
 	}
 	// Missing price cannot prove a bound — excluded.
-	p.Price = nil
+	p.PriceMinor = nil
 	if got, _ := checkCandidate(p, Constraints{PriceMax: f64(500)}); got != ExclMissingPrice {
 		t.Fatalf("missing price: got %q", got)
 	}
@@ -144,5 +146,20 @@ func TestPrefilterExclusionDetail(t *testing.T) {
 	code, detail = checkCandidate(p, Constraints{KeywordsMust: []string{"waterproof"}})
 	if code != ExclKeywordMissing || !strings.Contains(detail, "waterproof") {
 		t.Fatalf("keyword detail must carry the term: %q %q", code, detail)
+	}
+}
+
+// TestPrefilterPriceBoundaryExact — a price equal to the bound must pass.
+// With float prices, parsePrice("29.99") landed 1e-15 under the literal
+// while the bound parsed to 29.99 — the boundary candidate was excluded.
+// Minor units make the comparison exact.
+func TestPrefilterPriceBoundaryExact(t *testing.T) {
+	p := baseProduct()
+	p.PriceMinor = iminor(2999) // exactly 9.99
+	if got, _ := checkCandidate(p, Constraints{PriceMax: f64(29.99)}); got != "" {
+		t.Fatalf("boundary price excluded: %q", got)
+	}
+	if got, _ := checkCandidate(p, Constraints{PriceMax: f64(29.98)}); got != ExclPriceAboveMax {
+		t.Fatalf("one-cent-over must exclude: %q", got)
 	}
 }

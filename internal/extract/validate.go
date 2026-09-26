@@ -2,6 +2,8 @@ package extract
 
 import (
 	"math"
+
+	"github.com/anatolykoptev/go-product-search/internal/money"
 	"net/url"
 	"strings"
 	"unicode/utf8"
@@ -11,8 +13,8 @@ import (
 // never fabricated. A rejection flags the whole candidate
 // extraction_failed — degraded but visible.
 const (
-	minPrice          = 0.01
-	maxPrice          = 10_000_000
+	minPriceMinor     = int64(1)
+	maxPriceMajor     = int64(10_000_000) // major units; scaled per currency
 	maxRating         = 5.0
 	maxNameLen        = 500  // runes
 	maxSellerLen      = 200  // runes
@@ -54,10 +56,19 @@ func toSet(s string) map[string]struct{} {
 	return out
 }
 
-// priceValid reports whether a price pointer carries a sane value.
-func priceValid(p *float64) bool {
-	return p != nil && !math.IsNaN(*p) && !math.IsInf(*p, 0) &&
-		*p >= minPrice && *p <= maxPrice
+// priceMinorValid reports whether a minor-unit price carries a sane
+// value: positive, and under 10M major units for its currency (a JPY
+// price legitimately reaches 10⁹ minor units). Integer storage makes
+// NaN/Inf unrepresentable.
+func priceMinorValid(p *int64, currency string) bool {
+	if p == nil || *p < minPriceMinor {
+		return false
+	}
+	maxMinor := maxPriceMajor
+	for i := 0; i < money.Decimals(currency); i++ {
+		maxMinor *= 10
+	}
+	return *p <= maxMinor
 }
 
 func currencyOK(c string) bool {
@@ -69,7 +80,7 @@ func currencyOK(c string) bool {
 // required fields: name + price + currency. It is the trigger for detail
 // fetches and the LLM gate — cheaper than a full problems() pass.
 func missingRequired(p *Product) bool {
-	return strings.TrimSpace(p.Name) == "" || !priceValid(p.Price) || !currencyOK(p.Currency)
+	return strings.TrimSpace(p.Name) == "" || !priceMinorValid(p.PriceMinor, p.Currency) || !currencyOK(p.Currency)
 }
 
 // problems lists every validation problem on a merged product; empty means
@@ -90,12 +101,12 @@ func (p *Product) requiredProblems(out []string) []string {
 	} else if utf8.RuneCountInString(s) > maxNameLen {
 		out = append(out, "name too long")
 	}
-	if p.Price == nil {
+	if p.PriceMinor == nil {
 		out = append(out, "missing price")
-	} else if !priceValid(p.Price) {
+	} else if !priceMinorValid(p.PriceMinor, p.Currency) {
 		out = append(out, "price out of bounds")
 	}
-	if p.Price != nil && !currencyOK(p.Currency) {
+	if p.PriceMinor != nil && !currencyOK(p.Currency) {
 		out = append(out, "missing or unknown currency")
 	}
 	return out

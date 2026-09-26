@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anatolykoptev/go-product-search/internal/extract"
+	"github.com/anatolykoptev/go-product-search/internal/money"
 )
 
 // ReasonCode is the stable machine-readable vocabulary carried on
@@ -57,14 +58,22 @@ func checkPrice(p extract.Product, c Constraints) (ReasonCode, string) {
 	if c.PriceMin == nil && c.PriceMax == nil {
 		return "", ""
 	}
-	if p.Price == nil {
+	if p.PriceMinor == nil {
 		return ExclMissingPrice, "product carries no price"
 	}
-	if c.PriceMax != nil && *p.Price > *c.PriceMax {
-		return ExclPriceAboveMax, fmt.Sprintf("price %.2f > max %.2f", *p.Price, *c.PriceMax)
+	if c.PriceMax != nil {
+		if bound, ok := money.FromFloat(*c.PriceMax, p.Currency); ok && *p.PriceMinor > bound {
+			return ExclPriceAboveMax, fmt.Sprintf("price %s > max %s",
+				money.Format(*p.PriceMinor, p.Currency),
+				money.Format(bound, p.Currency))
+		}
 	}
-	if c.PriceMin != nil && *p.Price < *c.PriceMin {
-		return ExclPriceBelowMin, fmt.Sprintf("price %.2f < min %.2f", *p.Price, *c.PriceMin)
+	if c.PriceMin != nil {
+		if bound, ok := money.FromFloat(*c.PriceMin, p.Currency); ok && *p.PriceMinor < bound {
+			return ExclPriceBelowMin, fmt.Sprintf("price %s < min %s",
+				money.Format(*p.PriceMinor, p.Currency),
+				money.Format(bound, p.Currency))
+		}
 	}
 	return "", ""
 }
