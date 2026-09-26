@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/anatolykoptev/go-product-search/compare/v1.11.0...v1.11.1) (2026-09-26)
+
+
+### Fixed
+
+* **sources:** cover gad_*/srsltid/ad-network click ids ([a9f2611](https://github.com/anatolykoptev/go-product-search/commit/a9f2611f6c68019ebff4a93d8268aff5323899f6)), closes [#68](https://github.com/anatolykoptev/go-product-search/issues/68)
+
 ## [1.11.0](https://github.com/anatolykoptev/go-product-search/compare/v1.10.0...v1.11.0) (2026-09-26)
 
 
