@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/anatolykoptev/go-product-search/compare/v1.6.1...v1.7.0) (2026-09-26)
+
+
+### Added
+
+* **sources:** Shopify UCP catalog legs — per-shop search_catalog + global catalog ([9f85807](https://github.com/anatolykoptev/go-product-search/commit/9f85807d46afccd57ec4cac6256dc27c4754db20))
+
 ## [1.6.1](https://github.com/anatolykoptev/go-product-search/compare/v1.6.0...v1.6.1) (2026-09-26)
 
 
