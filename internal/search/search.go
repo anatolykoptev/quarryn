@@ -51,6 +51,7 @@ type Output struct {
 	// rank stage needs to build per-criterion explanations. Internal only —
 	// never serialized.
 	Questions []match.Question `json:"-"`
+	Plan      match.Plan       `json:"-"`
 }
 
 // New builds the pipeline: a go-wowa client (all third-party egress,
@@ -202,6 +203,7 @@ func (s *Searcher) SearchDetailed(ctx context.Context, query string, criteria []
 		Degraded:      mres.Degraded,
 		DegradeReason: mres.DegradeReason,
 		Questions:     plan.Questions,
+		Plan:          plan,
 	}, nil
 }
 
@@ -236,5 +238,6 @@ func (s *Searcher) MatchURL(ctx context.Context, rawURL string, criteria []strin
 		Degraded:      mres.Degraded,
 		DegradeReason: mres.DegradeReason,
 		Questions:     plan.Questions,
+		Plan:          plan,
 	}, nil
 }

@@ -61,6 +61,7 @@ type searchOutput struct {
 	Sources       []pssources.SourceStatus `json:"sources,omitempty"`
 	Degraded      bool                     `json:"degraded,omitempty"`
 	DegradeReason string                   `json:"degrade_reason,omitempty"`
+	Brief         *searchBrief             `json:"brief,omitempty"`
 }
 
 // matchOutput is the product_match response — a single judged product.
