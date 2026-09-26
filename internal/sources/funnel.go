@@ -211,6 +211,10 @@ func (f *Funnel) collect(ctx context.Context, a Adapter, q sources.Query) (Sourc
 			rejected++
 			continue
 		}
+		// Tracking params carry no product identity — strip them at the
+		// boundary so the provenance URL reaching users is clean
+		// (fail-closed for every adapter, not per-adapter).
+		r.URL = CleanTrackingURL(r.URL)
 		if cerr := f.checkURL(ctx, r.URL); cerr != nil {
 			rejected++
 			slog.Info("candidate rejected by SSRF guard",

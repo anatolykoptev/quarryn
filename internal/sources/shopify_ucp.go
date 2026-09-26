@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -203,7 +202,7 @@ func ucpProductToResult(shop string, p ucpProduct) (sources.Result, bool) {
 	if variant != nil {
 		rawURL = variant.URL
 	}
-	rawURL = ucpCleanURL(rawURL)
+	rawURL = CleanTrackingURL(rawURL)
 	if rawURL == "" {
 		return sources.Result{}, false
 	}
@@ -317,27 +316,4 @@ func ucpMinorToMajor(m ucpMoney) string {
 		return strconv.FormatInt(m.Amount, 10)
 	}
 	return strconv.FormatFloat(float64(m.Amount)/100, 'f', 2, 64)
-}
-
-// ucpCleanURL strips tracking params Shopify attaches to catalog variant
-// URLs (utm_*, _gsid). The wider affiliate denylist lives in the extract
-// layer; this is the adapter-edge minimum.
-func ucpCleanURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return ""
-	}
-	q := u.Query()
-	dirty := false
-	for k := range q {
-		lk := strings.ToLower(k)
-		if strings.HasPrefix(lk, "utm_") || lk == "_gsid" {
-			q.Del(k)
-			dirty = true
-		}
-	}
-	if dirty {
-		u.RawQuery = q.Encode()
-	}
-	return u.String()
 }

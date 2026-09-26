@@ -5,20 +5,8 @@ import (
 	"strings"
 
 	"github.com/anatolykoptev/go-kit/cache"
+	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
 )
-
-// trackingParams are URL query keys with no product identity: campaign and
-// click IDs (fbclid, gclid, ...), session tokens, and affiliate/nav params
-// (tag, ref on the target marketplaces carry no product identity — identity
-// lives in the path: /dp/ASIN, /itm/ID, /listing/ID, /products/handle).
-// utm_* is stripped by prefix, not membership.
-var trackingParams = map[string]struct{}{
-	"fbclid": {}, "gclid": {}, "gbraid": {}, "wbraid": {}, "msclkid": {},
-	"dclid": {}, "twclid": {}, "ttclid": {}, "igshid": {},
-	"mc_cid": {}, "mc_eid": {}, "_ga": {}, "_gac": {}, "_gl": {},
-	"sessionid": {}, "session_id": {}, "phpsessid": {}, "jsessionid": {},
-	"tag": {}, "ref": {}, "ref_": {}, "aff_id": {}, "affid": {},
-}
 
 // CanonicalURL normalizes a candidate URL for cache keys: lowercase scheme
 // and host, drop fragment/userinfo/default port/trailing slash, strip
@@ -44,12 +32,7 @@ func CanonicalURL(raw string) string {
 	}
 	q := u.Query()
 	for k := range q {
-		lk := strings.ToLower(k)
-		if strings.HasPrefix(lk, "utm_") {
-			q.Del(k)
-			continue
-		}
-		if _, ok := trackingParams[lk]; ok {
+		if pssources.IsTrackingParam(k) {
 			q.Del(k)
 		}
 	}
