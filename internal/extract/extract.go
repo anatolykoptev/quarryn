@@ -79,6 +79,11 @@ type Config struct {
 	MaxDetailFetches int
 	// Concurrency bounds parallel candidate processing. Default 4.
 	Concurrency int
+	// MaxBrowserCalls bounds live interact sessions per search. Browser
+	// work (CF solve + outbound hop) is ~20-60s per call and serves a
+	// different purpose than detail fetches — it must not starve behind
+	// cheap PDP fetches in the shared detail budget. <=0 defaults to 12.
+	MaxBrowserCalls int
 	// CandidateTimeout is the per-candidate bound covering cache lookup,
 	// detail fetch and LLM call. Default 45s.
 	CandidateTimeout time.Duration
@@ -119,6 +124,9 @@ type Config struct {
 func (c *Config) applyDefaults() {
 	if c.LLMTopN <= 0 {
 		c.LLMTopN = 10
+	}
+	if c.MaxBrowserCalls <= 0 {
+		c.MaxBrowserCalls = 12
 	}
 	if c.MaxDetailFetches <= 0 {
 		c.MaxDetailFetches = 15
@@ -173,6 +181,8 @@ func (p *Pipeline) Enrich(ctx context.Context, cands []sources.Candidate) []Enri
 	out := make([]EnrichedCandidate, len(cands))
 	var budget atomic.Int64
 	budget.Store(int64(p.cfg.MaxDetailFetches))
+	var browser atomic.Int64
+	browser.Store(int64(p.cfg.MaxBrowserCalls))
 
 	var g errgroup.Group
 	g.SetLimit(p.cfg.Concurrency)
@@ -180,7 +190,7 @@ func (p *Pipeline) Enrich(ctx context.Context, cands []sources.Candidate) []Enri
 		g.Go(func() error {
 			cctx, cancel := context.WithTimeout(ctx, p.cfg.CandidateTimeout)
 			defer cancel()
-			out[i] = p.enrichCandidate(cctx, i, cands[i], &budget)
+			out[i] = p.enrichCandidate(cctx, i, cands[i], &budget, &browser)
 			return nil // per-candidate failure is data, never fatal
 		})
 	}
@@ -190,7 +200,7 @@ func (p *Pipeline) Enrich(ctx context.Context, cands []sources.Candidate) []Enri
 
 // enrichCandidate runs one candidate through serp → cache → detail → LLM,
 // then stamps the outcome metric and the validation flags.
-func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Candidate, budget *atomic.Int64) EnrichedCandidate {
+func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Candidate, budget, browser *atomic.Int64) EnrichedCandidate {
 	ec := EnrichedCandidate{Candidate: c}
 	prod := productFromCandidate(c)
 	key := cacheKey(c.URL)
@@ -202,12 +212,12 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 			ec.Product = *cached
 			return ec
 		}
-		outcome = p.extractDetail(ctx, rank, c, &prod, &ec, budget)
+		outcome = p.extractDetail(ctx, rank, c, &prod, &ec, budget, browser)
 	} else if p.cfg.ResolveOutbound[c.Source] && prod.BuyURL == "" {
 		// SERP-complete card on a deal aggregator: the product is usable
 		// as-is, but the buyable merchant link lives behind the thread's
 		// outbound tracker — resolve it when the interact budget allows.
-		p.tryInteract(ctx, rank, c, &prod, budget, true)
+		p.tryInteract(ctx, rank, c, &prod, browser, true)
 	}
 
 	if probs := prod.problems(); len(probs) > 0 {
@@ -273,7 +283,7 @@ func (p *Pipeline) cachedProduct(ctx context.Context, key string) (*Product, boo
 // disposition outcome only for hard stops ("render_deferred",
 // "render_failed", "over_budget", "fetch_failed"); "" leaves outcome
 // selection to the caller's final state.
-func (p *Pipeline) extractDetail(ctx context.Context, rank int, c sources.Candidate, prod *Product, ec *EnrichedCandidate, budget *atomic.Int64) string {
+func (p *Pipeline) extractDetail(ctx context.Context, rank int, c sources.Candidate, prod *Product, ec *EnrichedCandidate, budget, browser *atomic.Int64) string {
 	declaredRender := p.fetchClass(c.Source) == sources.FetchClassRender
 	needRender := declaredRender
 	if !declaredRender {
@@ -298,7 +308,7 @@ func (p *Pipeline) extractDetail(ctx context.Context, rank int, c sources.Candid
 			if !declaredRender {
 				// Render could not clear the wall — try the live-session
 				// solve tier before spending an LLM call.
-				if p.tryInteract(ctx, rank, c, prod, budget, false) {
+				if p.tryInteract(ctx, rank, c, prod, browser, false) {
 					return ""
 				}
 				p.tryLLM(ctx, rank, c, prod, ec)
@@ -446,11 +456,18 @@ func (p *Pipeline) schemaMergeURL(pageURL, body string, prod *Product) bool {
 // a plain fetch. Gated to top-N funnel-ranked candidates like the LLM tier
 // (a session is expensive); counts against the detail budget. Returns true
 // when the recovered DOM merged product data.
-func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidate, prod *Product, budget *atomic.Int64, wantOutbound bool) bool {
-	if p.cfg.Interact == nil || rank >= p.cfg.LLMTopN {
+func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidate, prod *Product, browser *atomic.Int64, wantOutbound bool) bool {
+	if p.cfg.Interact == nil {
 		return false
 	}
-	if budget.Add(-1) < 0 {
+	if !wantOutbound && rank >= p.cfg.LLMTopN {
+		return false
+	}
+	if browser.Add(-1) < 0 {
+		if wantOutbound {
+			slog.Warn("extract: outbound resolve skipped, browser budget spent",
+				slog.String("url", c.URL))
+		}
 		return false
 	}
 	// Named session so the second call (outbound-link resolution) reuses
@@ -489,8 +506,8 @@ func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidat
 	if click == "" {
 		return merged
 	}
-	if budget.Add(-1) < 0 {
-		slog.Warn("extract: outbound hop skipped, detail budget spent",
+	if browser.Add(-1) < 0 {
+		slog.Warn("extract: outbound hop skipped, browser budget spent",
 			slog.String("url", c.URL))
 		return merged
 	}
