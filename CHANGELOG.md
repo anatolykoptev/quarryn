@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/anatolykoptev/go-product-search/compare/v1.7.0...v1.8.0) (2026-09-26)
+
+
+### Added
+
+* **sources:** strip affiliate/tracker params off candidate URLs at the funnel boundary ([#60](https://github.com/anatolykoptev/go-product-search/issues/60)) ([3c373ed](https://github.com/anatolykoptev/go-product-search/commit/3c373ede1a4a9dce78b562b630add9b548425f1e))
+
 ## [1.7.0](https://github.com/anatolykoptev/go-product-search/compare/v1.6.1...v1.7.0) (2026-09-26)
 
 
