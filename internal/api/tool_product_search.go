@@ -58,6 +58,7 @@ func handleProductSearch(ctx context.Context, d deps, in productSearchInput) (*m
 		}
 		resp.Results = append(resp.Results, project(r))
 	}
+	resp.Brief = composeBrief(in.Query, out.Plan, ranked, out.Sources)
 	return jsonResult(resp)
 }
 
