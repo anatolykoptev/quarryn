@@ -54,7 +54,7 @@ func TestMatchDeterministicOnly(t *testing.T) {
 		t.Fatalf("top = %+v", res.Candidates[0])
 	}
 	tail := res.Candidates[1]
-	if !tail.Excluded || tail.ExcludeReason != exclPriceAboveMax || tail.Passed {
+	if !tail.Excluded || tail.ExcludeReason != ExclPriceAboveMax || tail.Passed {
 		t.Fatalf("excluded candidate = %+v", tail)
 	}
 }
@@ -81,9 +81,9 @@ func TestMatchExclusionPaths(t *testing.T) {
 	var seenExcluded, seenJudged int
 	for _, jc := range res.Candidates {
 		switch {
-		case jc.Excluded && jc.ExcludeReason == exclExtractionFailed:
+		case jc.Excluded && jc.ExcludeReason == ExclExtractionFailed:
 			seenExcluded++
-		case jc.Excluded && jc.ExcludeReason == exclDeferredRender:
+		case jc.Excluded && jc.ExcludeReason == ExclDeferredRender:
 			seenExcluded++
 		case !jc.Excluded && len(jc.Verdicts) == 1:
 			seenJudged++

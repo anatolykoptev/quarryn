@@ -48,6 +48,7 @@ type productResult struct {
 	MatchedCriteria []rank.CriterionVerdict `json:"matched_criteria,omitempty"`
 	DealSignals     *rank.DealSignals       `json:"deal_signals,omitempty"`
 	ExcludedReason  string                  `json:"excluded_reason,omitempty"`
+	ExcludedDetail  string                  `json:"excluded_detail,omitempty"`
 	UnjudgedReason  string                  `json:"unjudged_reason,omitempty"`
 }
 

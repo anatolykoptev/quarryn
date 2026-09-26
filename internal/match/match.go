@@ -112,13 +112,15 @@ type JudgedCandidate struct {
 	MatchScore float64 `json:"match_score"`
 	// Excluded marks a deterministic-prefilter rejection (or an
 	// unextractable/deferred candidate that never reached it).
-	// ExcludeReason carries the bounded reason label.
-	Excluded      bool   `json:"excluded,omitempty"`
-	ExcludeReason string `json:"exclude_reason,omitempty"`
+	// ExcludeReason carries the bounded reason code; ExcludeDetail names
+	// the offending value (e.g. `price 320.00 > max 250.00`).
+	Excluded      bool       `json:"excluded,omitempty"`
+	ExcludeReason ReasonCode `json:"exclude_reason,omitempty"`
+	ExcludeDetail string     `json:"exclude_detail,omitempty"`
 	// UnjudgedReason explains absent Verdicts on a non-excluded candidate:
 	// a classified jeff failure ("jeff_*"), the candidate cap
 	// ("over_candidate_cap"), or ctx deadline while queued.
-	UnjudgedReason string `json:"unjudged_reason,omitempty"`
+	UnjudgedReason ReasonCode `json:"unjudged_reason,omitempty"`
 }
 
 // Result is one Match call's output plus its degrade surface. Degraded is
@@ -171,7 +173,7 @@ func (m *Matcher) Match(ctx context.Context, cands []extract.EnrichedCandidate, 
 		// No jeff configured while subjective criteria exist — every
 		// eligible candidate degrades loudly.
 		for _, i := range eligible {
-			m.markUnjudged(&res, i, reasonUnconfigured)
+			m.markUnjudged(&res, i, ReasonJeffUnconfigured)
 		}
 	default:
 		m.askAll(ctx, &res, eligible, plan.Questions, maxScore)
@@ -198,13 +200,15 @@ func (m *Matcher) prefilterAll(res *Result, cands []extract.EnrichedCandidate, c
 		jc := JudgedCandidate{EnrichedCandidate: c, Passed: true}
 		switch {
 		case c.ExtractionFailed:
-			jc.Excluded, jc.ExcludeReason = true, exclExtractionFailed
+			jc.Excluded, jc.ExcludeReason = true, ExclExtractionFailed
+			jc.ExcludeDetail = "page extraction failed or returned untrusted data"
 		case c.NeedsRender:
-			jc.Excluded, jc.ExcludeReason = true, exclDeferredRender
+			jc.Excluded, jc.ExcludeReason = true, ExclDeferredRender
+			jc.ExcludeDetail = "detail page needs a render the budget denied"
 		default:
-			if reason := checkCandidate(c.Product, cons); reason != "" {
-				jc.Excluded, jc.ExcludeReason = true, reason
-				prefilterExcluded.WithLabelValues(reason).Inc()
+			if reason, detail := checkCandidate(c.Product, cons); reason != "" {
+				jc.Excluded, jc.ExcludeReason, jc.ExcludeDetail = true, reason, detail
+				prefilterExcluded.WithLabelValues(string(reason)).Inc()
 			}
 		}
 		if jc.Excluded {
@@ -233,7 +237,7 @@ func (m *Matcher) capEligible(res *Result, cands []extract.EnrichedCandidate, el
 		return cands[eligible[a]].Score > cands[eligible[b]].Score
 	})
 	for _, i := range eligible[m.maxCands:] {
-		res.Candidates[i].UnjudgedReason = reasonOverCap
+		res.Candidates[i].UnjudgedReason = ReasonOverCandidateCap
 	}
 	return eligible[:m.maxCands]
 }

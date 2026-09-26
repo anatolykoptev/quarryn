@@ -120,7 +120,7 @@ func (m *Matcher) askAll(ctx context.Context, res *Result, eligible []int, qs []
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
-			m.markUnjudged(res, i, reasonCtxDeadline)
+			m.markUnjudged(res, i, ReasonCtxDeadline)
 			continue
 		}
 		wg.Add(1)
@@ -148,7 +148,7 @@ func (m *Matcher) judgeOne(ctx context.Context, res *Result, idx int, questions 
 	latencyMs := time.Since(start).Milliseconds()
 
 	var verdicts map[string]float64
-	outcome := "ok"
+	outcome := ReasonCode("ok")
 	if err != nil {
 		outcome = classifyJeffError(err, ctx)
 	} else {
@@ -159,7 +159,7 @@ func (m *Matcher) judgeOne(ctx context.Context, res *Result, idx int, questions 
 			// range check too) is unusable — degrade rather than feed
 			// wire garbage into MatchScore and the calibration histogram.
 			if !ok || !(a.Noul >= 0 && a.Noul <= 1) {
-				outcome = reasonNoAnswer
+				outcome = ReasonJeffNoAnswer
 				verdicts = nil
 				break
 			}

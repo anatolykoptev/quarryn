@@ -205,11 +205,11 @@ func TestDegradeOn429(t *testing.T) {
 	if !res.Degraded {
 		t.Fatal("429 flood did not degrade")
 	}
-	if !strings.Contains(res.DegradeReason, reasonSaturated) {
-		t.Fatalf("degrade reason = %q, want %s", res.DegradeReason, reasonSaturated)
+	if !strings.Contains(res.DegradeReason, string(ReasonJeffSaturated)) {
+		t.Fatalf("degrade reason = %q, want %s", res.DegradeReason, ReasonJeffSaturated)
 	}
 	for _, jc := range res.Candidates {
-		if jc.UnjudgedReason != reasonSaturated {
+		if jc.UnjudgedReason != ReasonJeffSaturated {
 			t.Fatalf("unjudged reason = %q", jc.UnjudgedReason)
 		}
 		if jc.Verdicts != nil {
@@ -248,8 +248,8 @@ func TestDegradeOnTimeout(t *testing.T) {
 	if !res.Degraded {
 		t.Fatal("slow jeff did not degrade")
 	}
-	if res.Candidates[0].UnjudgedReason != reasonTimeout {
-		t.Fatalf("unjudged reason = %q, want %s", res.Candidates[0].UnjudgedReason, reasonTimeout)
+	if res.Candidates[0].UnjudgedReason != ReasonJeffTimeout {
+		t.Fatalf("unjudged reason = %q, want %s", res.Candidates[0].UnjudgedReason, ReasonJeffTimeout)
 	}
 }
 
@@ -274,7 +274,7 @@ func TestPartialDegrade(t *testing.T) {
 	}
 	judged, unjudged := 0, 0
 	for _, jc := range res.Candidates {
-		if jc.UnjudgedReason == reasonSaturated {
+		if jc.UnjudgedReason == ReasonJeffSaturated {
 			unjudged++
 			if jc.Verdicts != nil {
 				t.Fatal("failed candidate carries verdicts")
@@ -304,7 +304,7 @@ func TestMissingAnswerDegrades(t *testing.T) {
 	res := m.Match(t.Context(), []extract.EnrichedCandidate{
 		enriched("A", "http://a.example/1", 100),
 	}, plan)
-	if !res.Degraded || res.Candidates[0].UnjudgedReason != reasonNoAnswer {
+	if !res.Degraded || res.Candidates[0].UnjudgedReason != ReasonJeffNoAnswer {
 		t.Fatalf("missing answer not degraded: %+v", res.Candidates[0])
 	}
 }
@@ -322,7 +322,7 @@ func TestUnconfiguredMatcherDegrades(t *testing.T) {
 	if !res.Degraded || res.DegradeReason == "" {
 		t.Fatal("unconfigured jeff not flagged degraded")
 	}
-	if res.Candidates[0].UnjudgedReason != reasonUnconfigured {
+	if res.Candidates[0].UnjudgedReason != ReasonJeffUnconfigured {
 		t.Fatalf("unjudged = %q", res.Candidates[0].UnjudgedReason)
 	}
 	// Degrade mode owes no jeff verdict — the prefilter pass stands.
@@ -362,8 +362,8 @@ func TestCallerCtxDeadlineWhileQueued(t *testing.T) {
 			t.Fatal("caller ctx death flagged degraded — not a jeff failure")
 		}
 		for _, jc := range r.Candidates {
-			if jc.UnjudgedReason != reasonCtxDeadline {
-				t.Fatalf("unjudged = %q, want %s", jc.UnjudgedReason, reasonCtxDeadline)
+			if jc.UnjudgedReason != ReasonCtxDeadline {
+				t.Fatalf("unjudged = %q, want %s", jc.UnjudgedReason, ReasonCtxDeadline)
 			}
 			if jc.Passed {
 				t.Fatal("ctx-canceled candidate claims the gate")
@@ -385,7 +385,7 @@ func TestOutOfRangeNoulDegrades(t *testing.T) {
 		res := m.Match(t.Context(), []extract.EnrichedCandidate{
 			enriched("A", "http://a.example/1", 100),
 		}, plan)
-		if !res.Degraded || res.Candidates[0].UnjudgedReason != reasonNoAnswer {
+		if !res.Degraded || res.Candidates[0].UnjudgedReason != ReasonJeffNoAnswer {
 			t.Fatalf("noul %v not degraded: %+v", prob, res.Candidates[0])
 		}
 		if res.Candidates[0].Verdicts != nil || res.Candidates[0].Passed {
