@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/anatolykoptev/go-product-search/compare/v1.4.0...v1.5.0) (2026-09-26)
+
+
+### Added
+
+* **extract:** dedicated browser-session budget for outbound resolution ([#41](https://github.com/anatolykoptev/go-product-search/issues/41)) ([da649e1](https://github.com/anatolykoptev/go-product-search/commit/da649e1d0b71e97c893eb1e082b276445a64e810))
+
 ## [1.4.0](https://github.com/anatolykoptev/go-product-search/compare/v1.3.3...v1.4.0) (2026-09-25)
 
 
