@@ -113,6 +113,7 @@ func newPipeline(cfg config.Config, gate *pssources.FetchGate, llm extract.LLMCa
 	return extract.New(gate, llm, extract.Config{
 		LLMTopN:          cfg.ExtractLLMTopN,
 		MaxDetailFetches: cfg.ExtractMaxDetailFetches,
+		MaxBrowserCalls:  cfg.ExtractMaxBrowserCalls,
 		Concurrency:      cfg.ExtractConcurrency,
 		CandidateTimeout: cfg.ExtractCandidateTimeout,
 		FetchTimeoutSecs: cfg.ExtractFetchTimeoutSecs,

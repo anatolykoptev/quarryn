@@ -79,8 +79,8 @@ type Config struct {
 	MaxDetailFetches int
 	// Concurrency bounds parallel candidate processing. Default 4.
 	Concurrency int
-	// MaxBrowserCalls bounds live interact sessions per search. Browser
-	// work (CF solve + outbound hop) is ~20-60s per call and serves a
+	// MaxBrowserCalls bounds interact resolutions per search (one unit
+	// covers session + outbound hop; ~30-60s of real Chrome each). It serves a
 	// different purpose than detail fetches — it must not starve behind
 	// cheap PDP fetches in the shared detail budget. <=0 defaults to 12.
 	MaxBrowserCalls int
@@ -463,6 +463,9 @@ func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidat
 	if !wantOutbound && rank >= p.cfg.LLMTopN {
 		return false
 	}
+	// One browser unit buys the whole resolution: the thread session AND
+	// its outbound hop. Charging per call let call-1 sessions consume the
+	// pool and then deny their own hops — wasted solves, no buy_url.
 	if browser.Add(-1) < 0 {
 		if wantOutbound {
 			slog.Warn("extract: outbound resolve skipped, browser budget spent",
@@ -504,11 +507,6 @@ func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidat
 	// (slickdeals /click). Follow it in-session — the merchant page may
 	// carry real Product schema the thread never had.
 	if click == "" {
-		return merged
-	}
-	if browser.Add(-1) < 0 {
-		slog.Warn("extract: outbound hop skipped, browser budget spent",
-			slog.String("url", c.URL))
 		return merged
 	}
 	merged = p.interactOutbound(ctx, session, click, c, prod) || merged
