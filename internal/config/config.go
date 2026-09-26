@@ -51,6 +51,7 @@ type Config struct {
 	// process-local, resets on restart.
 	ExtractLLMTopN          int
 	ExtractMaxDetailFetches int
+	ExtractMaxBrowserCalls  int
 	ExtractConcurrency      int
 	ExtractFetchTimeoutSecs int
 	ExtractCandidateTimeout time.Duration
@@ -108,6 +109,7 @@ func Load() Config {
 		// Extraction stage.
 		ExtractLLMTopN:          env.Int("EXTRACT_LLM_TOP_N", 10),
 		ExtractMaxDetailFetches: env.Int("EXTRACT_MAX_DETAIL_FETCHES", 15),
+		ExtractMaxBrowserCalls:  env.Int("EXTRACT_MAX_BROWSER_CALLS", 12),
 		ExtractConcurrency:      env.Int("EXTRACT_CONCURRENCY", 4),
 		ExtractFetchTimeoutSecs: env.Int("EXTRACT_FETCH_TIMEOUT_SECS", 25),
 		ExtractCandidateTimeout: env.Duration("EXTRACT_CANDIDATE_TIMEOUT", 45*time.Second),
