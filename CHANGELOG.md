@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/anatolykoptev/go-product-search/compare/v1.10.0...v1.11.0) (2026-09-26)
+
+
+### Added
+
+* **api:** code-composed search brief ([7ba0afe](https://github.com/anatolykoptev/go-product-search/commit/7ba0afe35913504e055804b33506789af2611ed4)), closes [#54](https://github.com/anatolykoptev/go-product-search/issues/54)
+
 ## [1.10.0](https://github.com/anatolykoptev/go-product-search/compare/v1.9.0...v1.10.0) (2026-09-26)
 
 
