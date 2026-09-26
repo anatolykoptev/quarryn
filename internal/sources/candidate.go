@@ -1,6 +1,7 @@
 package sources
 
 import (
+	"github.com/anatolykoptev/go-product-search/internal/money"
 	"strconv"
 
 	"github.com/anatolykoptev/go-engine/sources"
@@ -15,8 +16,8 @@ type Candidate struct {
 	Title        string   `json:"title"`
 	URL          string   `json:"url"`
 	Content      string   `json:"content,omitempty"`
-	Score        float64  `json:"score"` // fused funnel score; higher = stronger cross-source consensus
-	Price        *float64 `json:"price,omitempty"`
+	Score        float64  `json:"score"`                 // fused funnel score; higher = stronger cross-source consensus
+	PriceMinor   *int64   `json:"price_minor,omitempty"` // minor units in Currency
 	Currency     string   `json:"currency,omitempty"`
 	Condition    string   `json:"condition,omitempty"`
 	Availability string   `json:"availability,omitempty"`
@@ -64,8 +65,8 @@ func candidateFromResult(r sources.Result) Candidate {
 	// still land in Metadata so nothing vanishes silently.
 	decodeFailed := make(map[string]struct{})
 	if s := r.Metadata[MetaPrice]; s != "" {
-		if v, err := strconv.ParseFloat(s, 64); err == nil {
-			c.Price = &v
+		if v, ok := money.ToMinor(s, c.Currency); ok {
+			c.PriceMinor = &v
 		} else {
 			decodeFailed[MetaPrice] = struct{}{}
 		}

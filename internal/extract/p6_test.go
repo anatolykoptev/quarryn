@@ -107,7 +107,7 @@ func TestEnrichRenderClassUsesRenderer(t *testing.T) {
 	if out[0].NeedsRender || out[0].ExtractionFailed {
 		t.Fatalf("rendered candidate wrongly flagged: %+v", out[0])
 	}
-	if out[0].Product.Method != MethodRender || *out[0].Product.Price != 278.0 {
+	if out[0].Product.Method != MethodRender || *out[0].Product.PriceMinor != 27800 {
 		t.Fatalf("render product = %+v", out[0].Product)
 	}
 }
@@ -219,7 +219,7 @@ func TestEnrichCFErrorEscalatesToRender(t *testing.T) {
 	if out[0].NeedsRender || out[0].ExtractionFailed {
 		t.Fatalf("CF-error candidate wrongly flagged: %+v", out[0])
 	}
-	if out[0].Product.Method != MethodRender || out[0].Product.Price == nil {
+	if out[0].Product.Method != MethodRender || out[0].Product.PriceMinor == nil {
 		t.Fatalf("rendered product = %+v", out[0].Product)
 	}
 }

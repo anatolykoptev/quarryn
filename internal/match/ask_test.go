@@ -13,7 +13,10 @@ import (
 
 	"github.com/anatolykoptev/go-kit/jeff"
 	"github.com/anatolykoptev/go-product-search/internal/extract"
+	"github.com/anatolykoptev/go-product-search/internal/money"
 )
+
+func f64m(v float64) *int64 { m, _ := money.FromFloat(v, "USD"); return &m }
 
 func enriched(name, url string, price float64) extract.EnrichedCandidate {
 	var ec extract.EnrichedCandidate
@@ -21,7 +24,7 @@ func enriched(name, url string, price float64) extract.EnrichedCandidate {
 	ec.URL = url
 	ec.Score = 0.8
 	ec.Product = extract.Product{
-		Name: name, URL: url, Price: f64(price), Currency: "USD",
+		Name: name, URL: url, PriceMinor: f64m(price), Currency: "USD",
 		Availability: "in_stock", Source: "shop.example",
 	}
 	return ec

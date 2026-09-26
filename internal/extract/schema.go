@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anatolykoptev/go-product-search/internal/money"
 	"net/url"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/anatolykoptev/go-enriche/structured"
 	"github.com/astappiev/microdata"
@@ -181,14 +181,18 @@ func applyVariantOffers(p *Product, group *microdata.Item) {
 // applyOffer fills still-empty Product fields from one Offer or
 // AggregateOffer item; earlier offers win on conflicts.
 func applyOffer(p *Product, off *microdata.Item) {
-	if p.Price == nil {
-		if s := propStr(off, "price", "lowPrice"); s != nil {
-			if f, ok := parsePrice(*s); ok {
-				p.Price = &f
-			}
-		}
+	var priceStr *string
+	if p.PriceMinor == nil {
+		priceStr = propStr(off, "price", "lowPrice")
 	}
 	fillStr(&p.Currency, off, "priceCurrency")
+	// Currency is filled first so the literal converts with the offer's
+	// own exponent (JPY "1999" is 1999, not 19.99).
+	if priceStr != nil {
+		if m, ok := money.ToMinor(*priceStr, p.Currency); ok {
+			p.PriceMinor = &m
+		}
+	}
 	fillStr(&p.Availability, off, "availability")
 	fillStr(&p.Condition, off, "itemCondition")
 	if p.SellerName == "" {
@@ -236,68 +240,6 @@ func propStr(item *microdata.Item, keys ...string) *string {
 		}
 	}
 	return nil
-}
-
-// parsePrice parses a price literal ("278.00", "$1,299.00", "1 299,00 €",
-// JSON-LD "price": 49.99 decoded as float64) into a float64. Returns false
-// when no numeric token is found.
-func parsePrice(s string) (float64, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, false
-	}
-	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return f, true
-	}
-	start := strings.IndexFunc(s, unicode.IsDigit)
-	if start < 0 {
-		return 0, false
-	}
-	end := len(s)
-	for i := start; i < len(s); i++ {
-		if !isNumericByte(s[i]) {
-			end = i
-			break
-		}
-	}
-	return parseNumericToken(strings.TrimSpace(s[start:end]))
-}
-
-// isNumericByte reports whether c can appear inside a price token.
-func isNumericByte(c byte) bool {
-	return c >= '0' && c <= '9' || c == '.' || c == ',' || c == '\'' || c == ' '
-}
-
-// parseNumericToken resolves "1,299.00" / "1.299,00" / "1 299,00" style
-// separator ambiguity: the RIGHTMOST separator wins as decimal mark when
-// both appear; a lone comma counts as decimal only when followed by 1-2
-// trailing digits ("12,50" → 12.5, "1,299" → 1299).
-func parseNumericToken(s string) (float64, bool) {
-	s = strings.Map(func(r rune) rune {
-		if r == '\'' || unicode.IsSpace(r) {
-			return -1
-		}
-		return r
-	}, s)
-	dot := strings.LastIndexByte(s, '.')
-	comma := strings.LastIndexByte(s, ',')
-	switch {
-	case dot >= 0 && comma >= 0:
-		if dot > comma {
-			s = strings.ReplaceAll(s, ",", "")
-		} else {
-			s = strings.ReplaceAll(strings.ReplaceAll(s, ".", ""), ",", ".")
-		}
-	case comma >= 0:
-		rest := s[comma+1:]
-		if len(rest) <= 2 && strings.IndexByte(s[:comma], ',') < 0 {
-			s = strings.ReplaceAll(s, ",", ".")
-		} else {
-			s = strings.ReplaceAll(s, ",", "")
-		}
-	}
-	f, err := strconv.ParseFloat(s, 64)
-	return f, err == nil
 }
 
 // domainOf returns the lowercased product-page host without a www. prefix.

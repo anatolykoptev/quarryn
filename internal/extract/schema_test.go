@@ -83,8 +83,8 @@ func TestSchemaAmazonStyle(t *testing.T) {
 	if p.Name != "Sony WH-1000XM5 Wireless Noise Canceling Headphones" {
 		t.Fatalf("name = %q", p.Name)
 	}
-	if p.Price == nil || *p.Price != 278.00 {
-		t.Fatalf("price = %v", p.Price)
+	if p.PriceMinor == nil || *p.PriceMinor != 27800 {
+		t.Fatalf("price = %v", p.PriceMinor)
 	}
 	if p.Currency != "USD" || p.Availability != "in_stock" || p.Condition != "new" {
 		t.Fatalf("offer fields = %+v", p)
@@ -115,8 +115,8 @@ func TestSchemaShopifyGraph(t *testing.T) {
 	if p.Name != "Minimalist Ceramic Mug" {
 		t.Fatalf("name = %q", p.Name)
 	}
-	if p.Price == nil || *p.Price != 24.5 {
-		t.Fatalf("price = %v", p.Price)
+	if p.PriceMinor == nil || *p.PriceMinor != 2450 {
+		t.Fatalf("price = %v", p.PriceMinor)
 	}
 	if p.Availability != "out_of_stock" || p.Condition != "used" {
 		t.Fatalf("avail/cond = %q %q", p.Availability, p.Condition)
@@ -139,8 +139,8 @@ func TestSchemaEtsyItemListPicksMatchingURL(t *testing.T) {
 	if p.Name != "Vintage Travel Poster" {
 		t.Fatalf("picked wrong product: %q", p.Name)
 	}
-	if p.Price == nil || *p.Price != 12.0 || p.Currency != "EUR" {
-		t.Fatalf("price/currency = %v %q", p.Price, p.Currency)
+	if p.PriceMinor == nil || *p.PriceMinor != 1200 || p.Currency != "EUR" {
+		t.Fatalf("price/currency = %v %q", p.PriceMinor, p.Currency)
 	}
 	if p.Availability != "out_of_stock" || p.SellerName != "PosterShop" {
 		t.Fatalf("avail/seller = %q %q", p.Availability, p.SellerName)
@@ -155,8 +155,8 @@ func TestSchemaMicrodata(t *testing.T) {
 	if p.Name != "Walnut Desk Organizer" {
 		t.Fatalf("name = %q", p.Name)
 	}
-	if p.Price == nil || *p.Price != 89.0 {
-		t.Fatalf("price = %v", p.Price)
+	if p.PriceMinor == nil || *p.PriceMinor != 8900 {
+		t.Fatalf("price = %v", p.PriceMinor)
 	}
 	if p.Availability != "limited" || p.Condition != "refurbished" {
 		t.Fatalf("avail/cond = %q %q", p.Availability, p.Condition)
@@ -169,28 +169,6 @@ func TestSchemaNoProduct(t *testing.T) {
 	}
 	if _, err := productFromSchema([]byte(`<html><body>plain</body></html>`), "https://x.example.com/p/1"); err != errNoProduct {
 		t.Fatalf("expected errNoProduct, got %v", err)
-	}
-}
-
-func TestParsePrice(t *testing.T) {
-	cases := map[string]float64{
-		"278.00":     278.0,
-		"$1,299.00":  1299.0,
-		"1.299,00 €": 1299.0,
-		"1 299,00":   1299.0,
-		"12,50":      12.5,
-		"USD 9.99":   9.99,
-	}
-	for in, want := range cases {
-		got, ok := parsePrice(in)
-		if !ok || got != want {
-			t.Errorf("parsePrice(%q) = %v,%v want %v", in, got, ok, want)
-		}
-	}
-	for _, bad := range []string{"", "no price", "abc"} {
-		if _, ok := parsePrice(bad); ok {
-			t.Errorf("parsePrice(%q) unexpectedly succeeded", bad)
-		}
 	}
 }
 
@@ -227,8 +205,8 @@ func TestSchemaProductGroupVariants(t *testing.T) {
 	if p.Name != "Men's Strider Explore" {
 		t.Fatalf("name = %q", p.Name)
 	}
-	if p.Price == nil || *p.Price != 98.0 {
-		t.Fatalf("price = %v (first variant offer must win)", p.Price)
+	if p.PriceMinor == nil || *p.PriceMinor != 9800 {
+		t.Fatalf("price = %v (first variant offer must win)", p.PriceMinor)
 	}
 	if p.Currency != "USD" || p.Availability != "in_stock" {
 		t.Fatalf("currency/avail = %q %q", p.Currency, p.Availability)

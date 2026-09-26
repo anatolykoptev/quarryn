@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/anatolykoptev/go-kit/wowa"
+	"github.com/anatolykoptev/go-product-search/internal/money"
 )
 
 // productJSONSchema is the fixed JSON Schema handed to wowa
@@ -73,7 +74,6 @@ func (p *Pipeline) llmExtract(ctx context.Context, pageURL string) (*Product, er
 	prod := &Product{
 		Name:         lp.Name,
 		URL:          pageURL,
-		Price:        lp.Price,
 		Currency:     normalizeCurrency(lp.Currency),
 		Availability: normalizeAvailability(lp.Availability),
 		Condition:    normalizeCondition(lp.Condition),
@@ -83,6 +83,11 @@ func (p *Pipeline) llmExtract(ctx context.Context, pageURL string) (*Product, er
 		Description:  lp.Description,
 		Source:       domainOf(pageURL),
 		Method:       MethodLLM,
+	}
+	if lp.Price != nil {
+		if m, ok := money.FromFloat(*lp.Price, prod.Currency); ok {
+			prod.PriceMinor = &m
+		}
 	}
 	if len(resp.Data) <= maxRawLen {
 		prod.Raw = resp.Data

@@ -12,6 +12,8 @@ var defaultWeights = Weights{Funnel: 0.3, Deal: 0.2, Jeff: 0.5}
 
 func f64(v float64) *float64 { return &v }
 
+func iminor(v int64) *int64 { return &v }
+
 func i64(v int) *int { return &v }
 
 // judged builds a judged candidate: funnel score + verdicts.
@@ -21,7 +23,7 @@ func judged(url string, funnel float64, verdicts map[string]float64) match.Judge
 	ec.URL = url
 	ec.Score = funnel
 	ec.Product = extract.Product{
-		Name: url, URL: url, Price: f64(100), Currency: "USD",
+		Name: url, URL: url, PriceMinor: iminor(10000), Currency: "USD",
 		Availability: "in_stock", Source: "shop.example",
 	}
 	return match.JudgedCandidate{EnrichedCandidate: ec, Verdicts: verdicts, Passed: true}

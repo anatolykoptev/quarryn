@@ -8,10 +8,10 @@ import (
 
 func validProduct() *Product {
 	return &Product{
-		Name:     "Thing",
-		URL:      "https://shop.example.com/p/1",
-		Price:    f64(9.99),
-		Currency: "USD",
+		Name:       "Thing",
+		URL:        "https://shop.example.com/p/1",
+		PriceMinor: iminor(999),
+		Currency:   "USD",
 	}
 }
 
@@ -22,15 +22,15 @@ func TestProblemsValidProductPasses(t *testing.T) {
 }
 
 func TestProblemsRejectsBadPrices(t *testing.T) {
-	for _, v := range []float64{0, -1, 0.001, 10_000_001, 1e15, math.NaN(), math.Inf(1)} {
+	for _, v := range []int64{0, -1, -500, math.MaxInt64} {
 		p := validProduct()
-		p.Price = &v
+		p.PriceMinor = &v
 		if probs := p.problems(); len(probs) == 0 {
 			t.Errorf("price %v accepted", v)
 		}
 	}
 	p := validProduct()
-	p.Price = nil
+	p.PriceMinor = nil
 	if probs := p.problems(); len(probs) == 0 {
 		t.Error("missing price accepted")
 	}

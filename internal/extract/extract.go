@@ -691,7 +691,7 @@ func productFromCandidate(c sources.Candidate) Product {
 	return Product{
 		Name:         strings.TrimSpace(c.Title),
 		URL:          c.URL,
-		Price:        c.Price,
+		PriceMinor:   c.PriceMinor,
 		Currency:     normalizeCurrency(c.Currency),
 		Condition:    normalizeCondition(c.Condition),
 		Availability: normalizeAvailability(c.Availability),
@@ -716,11 +716,11 @@ func mergeRequired(dst *Product, src *Product) {
 	if strings.TrimSpace(dst.Name) == "" {
 		dst.Name = src.Name
 	}
-	if !priceValid(dst.Price) && src.Price != nil {
-		dst.Price = src.Price
-	}
 	if !currencyOK(dst.Currency) && src.Currency != "" {
 		dst.Currency = src.Currency
+	}
+	if !priceMinorValid(dst.PriceMinor, dst.Currency) && src.PriceMinor != nil {
+		dst.PriceMinor = src.PriceMinor
 	}
 }
 

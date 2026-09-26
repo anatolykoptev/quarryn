@@ -47,11 +47,13 @@ func testConfig() Config {
 	return Config{LLMTopN: 10, MaxDetailFetches: 15, Concurrency: 2}
 }
 
-func cand(url, title string, price *float64) sources.Candidate {
-	return sources.Candidate{Source: "shopify", Title: title, URL: url, Price: price}
+func cand(url, title string, priceMinor *int64) sources.Candidate {
+	return sources.Candidate{Source: "shopify", Title: title, URL: url, PriceMinor: priceMinor}
 }
 
 func f64(v float64) *float64 { return &v }
+
+func iminor(v int64) *int64 { return &v }
 
 func TestEnrichSerpSufficient_NoFetch(t *testing.T) {
 	f := &stubFetcher{resp: &wowa.FetchResponse{Status: 200, Body: amazonProductHTML}}
@@ -59,7 +61,7 @@ func TestEnrichSerpSufficient_NoFetch(t *testing.T) {
 	p := New(f, x, testConfig())
 	out := p.Enrich(t.Context(), []sources.Candidate{
 		{Source: "ebay", Title: "Sony headphones", URL: "https://www.ebay.com/itm/1",
-			Price: f64(19.99), Currency: "USD"},
+			PriceMinor: iminor(1999), Currency: "USD"},
 	})
 	if len(out) != 1 || out[0].ExtractionFailed {
 		t.Fatalf("unexpected result: %+v", out)
@@ -83,7 +85,7 @@ func TestEnrichDetailFetchSchemaFillsPrice(t *testing.T) {
 		t.Fatalf("fetch calls = %d", f.calls.Load())
 	}
 	got := out[0]
-	if got.ExtractionFailed || got.Product.Price == nil || *got.Product.Price != 278.0 {
+	if got.ExtractionFailed || got.Product.PriceMinor == nil || *got.Product.PriceMinor != 27800 {
 		t.Fatalf("schema fill failed: %+v", got)
 	}
 	if got.Product.Method != MethodSchema || got.Product.Currency != "USD" {
@@ -106,7 +108,7 @@ func TestEnrichCacheHitAvoidsSecondFetch(t *testing.T) {
 	if f.calls.Load() != 1 {
 		t.Fatalf("cache miss on second Enrich: fetch calls = %d", f.calls.Load())
 	}
-	if out[0].Product.Price == nil || *out[0].Product.Price != 278.0 {
+	if out[0].Product.PriceMinor == nil || *out[0].Product.PriceMinor != 27800 {
 		t.Fatalf("cached product wrong: %+v", out[0].Product)
 	}
 }
@@ -125,7 +127,7 @@ func TestEnrichLLMFallbackFillsPrice(t *testing.T) {
 	if got.ExtractionFailed || got.Product.Method != MethodLLM {
 		t.Fatalf("llm fallback failed: %+v", got)
 	}
-	if got.Product.Price == nil || *got.Product.Price != 42.5 || got.Product.Name != "Mystery Gadget" {
+	if got.Product.PriceMinor == nil || *got.Product.PriceMinor != 4250 || got.Product.Name != "Mystery Gadget" {
 		t.Fatalf("llm product = %+v", got.Product)
 	}
 	if got.Product.Condition != "used" {
@@ -214,7 +216,7 @@ func TestEnrichDetailBudgetExhausted(t *testing.T) {
 	for _, ec := range out {
 		if ec.ExtractionFailed {
 			failed++
-		} else if ec.Product.Price != nil {
+		} else if ec.Product.PriceMinor != nil {
 			enriched++
 		}
 	}
@@ -231,12 +233,12 @@ func TestEnrichInvalidSerpPriceRecoveredBySchema(t *testing.T) {
 	p := New(f, nil, testConfig())
 	out := p.Enrich(t.Context(), []sources.Candidate{
 		{Source: "ebay", Title: "x", URL: "https://www.ebay.com/itm/9",
-			Price: f64(0), Currency: "USD"}, // serp price 0 → invalid → detail fetch
+			PriceMinor: iminor(0), Currency: "USD"}, // serp price 0 → invalid → detail fetch
 	})
 	if f.calls.Load() != 1 {
 		t.Fatal("invalid serp price did not trigger detail fetch")
 	}
-	if out[0].ExtractionFailed || *out[0].Product.Price != 278.0 {
+	if out[0].ExtractionFailed || *out[0].Product.PriceMinor != 27800 {
 		t.Fatalf("schema did not repair serp price: %+v", out[0])
 	}
 }
@@ -298,14 +300,14 @@ func TestEnrichAgainstFakedWowa(t *testing.T) {
 	if got.ExtractionFailed || got.Product.Method != MethodLLM {
 		t.Fatalf("wowa fallback chain failed: %+v", got)
 	}
-	if *got.Product.Price != 19.95 || got.Product.Name != "Faked Lamp" {
+	if *got.Product.PriceMinor != 1995 || got.Product.Name != "Faked Lamp" {
 		t.Fatalf("llm product wrong: %+v", got.Product)
 	}
 }
 
 func TestProductPublicIsEgressAllowlist(t *testing.T) {
 	p := Product{
-		Name: "Gadget", Price: f64(9.99), Currency: "USD",
+		Name: "Gadget", PriceMinor: iminor(999), Currency: "USD",
 		Availability: "in_stock", Condition: "used", SellerName: "secretSeller42",
 		Source: "ebay.com", URL: "https://www.ebay.com/itm/1",
 		Description: strings.Repeat("x", 600),
@@ -471,7 +473,7 @@ func TestEnrichResolvesOutboundCard(t *testing.T) {
 
 	out := p.Enrich(t.Context(), []sources.Candidate{
 		{Source: "slickdeals", Title: "JBL Charge 6 @ Woot", URL: "https://slickdeals.net/f/42-x",
-			Price: f64(95.96), Currency: "USD"},
+			PriceMinor: iminor(9596), Currency: "USD"},
 	})
 	if f.calls.Load() != 0 {
 		t.Fatalf("card-complete candidate must not fetch detail: fetches=%d", f.calls.Load())
