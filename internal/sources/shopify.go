@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -29,13 +30,30 @@ type shopifyAdapter struct {
 	fetch       Fetcher
 	shops       []string
 	timeoutSecs int
+	// profileURL is the hosted UCP agent profile (SHOPIFY_UCP_PROFILE_URL);
+	// empty disables both UCP legs.
+	profileURL string
+	// globalURL is the Global Catalog MCP endpoint (SHOPIFY_UCP_GLOBAL_URL,
+	// empty → ucpGlobalCatalogURL).
+	globalURL string
+	// globalOff disables the global-catalog leg (SHOPIFY_UCP_GLOBAL=0).
+	globalOff bool
 }
 
-// NewShopify returns the generic Shopify adapter. shops are bare shop
-// domains (scheme/slashes stripped). Empty list ships the adapter dark.
-func NewShopify(fetcher Fetcher, shops []string) Adapter {
-	clean := make([]string, 0, len(shops))
-	for _, s := range shops {
+// ShopifyConfig carries the adapter's knobs. Shops are bare shop domains
+// (scheme/slashes stripped). ProfileURL enables the UCP MCP legs; empty
+// ships the adapter dark unless shops are configured.
+type ShopifyConfig struct {
+	Shops      []string // SHOPIFY_SHOPS
+	ProfileURL string   // SHOPIFY_UCP_PROFILE_URL
+	GlobalURL  string   // SHOPIFY_UCP_GLOBAL_URL override
+	GlobalOff  bool     // SHOPIFY_UCP_GLOBAL=0 disables the global-catalog leg
+}
+
+// NewShopify returns the generic Shopify adapter.
+func NewShopify(fetcher Fetcher, cfg ShopifyConfig) Adapter {
+	clean := make([]string, 0, len(cfg.Shops))
+	for _, s := range cfg.Shops {
 		s = strings.TrimSpace(s)
 		s = strings.TrimPrefix(s, "https://")
 		s = strings.TrimPrefix(s, "http://")
@@ -44,10 +62,17 @@ func NewShopify(fetcher Fetcher, shops []string) Adapter {
 			clean = append(clean, s)
 		}
 	}
+	global := strings.TrimSpace(cfg.GlobalURL)
+	if global == "" {
+		global = ucpGlobalCatalogURL
+	}
 	return &shopifyAdapter{
 		fetch:       fetcher,
 		shops:       clean,
 		timeoutSecs: shopifyFetchTimeoutSecs,
+		profileURL:  strings.TrimSpace(cfg.ProfileURL),
+		globalURL:   global,
+		globalOff:   cfg.GlobalOff,
 	}
 }
 
@@ -57,10 +82,14 @@ func (a *shopifyAdapter) Name() string { return "shopify" }
 // Spec implements Adapter.
 func (a *shopifyAdapter) Spec() SourceSpec { return SourceSpec{FetchClass: FetchClassFetch} }
 
-// Enabled implements Adapter — needs a wowa fetcher and at least one shop.
+// Enabled implements Adapter — needs a wowa fetcher and at least one shop,
+// or the UCP agent profile (which alone unlocks the global catalog).
 func (a *shopifyAdapter) Enabled() bool {
-	return a.fetch != nil && len(a.shops) > 0
+	return a.fetch != nil && (len(a.shops) > 0 || a.ucpEnabled())
 }
+
+// ucpEnabled reports whether the UCP MCP legs are armed.
+func (a *shopifyAdapter) ucpEnabled() bool { return a.profileURL != "" }
 
 // shopifyProductsResponse models GET /products.json.
 type shopifyProductsResponse struct {
@@ -89,16 +118,25 @@ type shopifyVariant struct {
 	SKU            string  `json:"sku"`
 }
 
-// Search fetches products.json from each configured shop and returns the
-// products matching the query (case-insensitive substring over title,
-// vendor, product_type, tags; empty query matches all). A failing shop is
-// logged and skipped — the adapter only errors when every shop fails.
+// Search queries the Shopify Global Catalog (when the UCP profile is
+// configured) and each configured shop — UCP search_catalog first,
+// products.json as fallback. A failing leg is logged and skipped — the
+// adapter only errors when every leg fails.
 func (a *shopifyAdapter) Search(ctx context.Context, q sources.Query) ([]sources.Result, error) {
 	if !a.Enabled() {
-		return nil, fmt.Errorf("shopify: adapter disabled (no wowa fetcher or SHOPIFY_SHOPS empty)")
+		return nil, fmt.Errorf("shopify: adapter disabled (no wowa fetcher, SHOPIFY_SHOPS empty, no SHOPIFY_UCP_PROFILE_URL)")
 	}
 	var out []sources.Result
 	var lastErr error
+	if a.ucpEnabled() && !a.globalOff {
+		res, err := a.searchGlobal(ctx, q)
+		if err != nil {
+			lastErr = err
+			slog.Warn("shopify: global catalog search failed", slog.Any("error", err))
+		} else {
+			out = append(out, res...)
+		}
+	}
 	for _, shop := range a.shops {
 		res, err := a.searchShop(ctx, shop, q)
 		if err != nil {
@@ -113,8 +151,40 @@ func (a *shopifyAdapter) Search(ctx context.Context, q sources.Query) ([]sources
 	return out, nil
 }
 
-// searchShop fetches and maps one shop's catalog.
+// searchGlobal queries Shopify's Global Catalog — cross-store relevance
+// search with seller identity on every variant.
+func (a *shopifyAdapter) searchGlobal(ctx context.Context, q sources.Query) ([]sources.Result, error) {
+	products, err := a.ucpSearch(ctx, a.globalURL, q.Text, ucpGlobalLimit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]sources.Result, 0, len(products))
+	for _, p := range products {
+		if r, ok := ucpProductToResult("", p); ok {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// searchShop queries one shop's catalog: UCP search_catalog when the
+// profile is configured, products.json as fallback (UCP failure or leg
+// dark — storefronts without UCP still serve products.json).
 func (a *shopifyAdapter) searchShop(ctx context.Context, shop string, q sources.Query) ([]sources.Result, error) {
+	if a.ucpEnabled() {
+		products, err := a.ucpSearch(ctx, "https://"+shop+"/api/ucp/mcp", q.Text, ucpShopLimit)
+		if err == nil {
+			out := make([]sources.Result, 0, len(products))
+			for _, p := range products {
+				if r, ok := ucpProductToResult(shop, p); ok {
+					out = append(out, r)
+				}
+			}
+			return out, nil
+		}
+		slog.Info("shopify: ucp leg failed, falling back to products.json",
+			slog.String("shop", shop), slog.Any("error", err))
+	}
 	u := "https://" + shop + "/products.json?limit=" + strconv.Itoa(shopifyProductLimit)
 	resp, err := a.fetch.Fetch(ctx, wowa.FetchRequest{
 		URL:         u,
