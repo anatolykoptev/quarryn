@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.17.1](https://github.com/anatolykoptev/quarryn/compare/v1.17.0...v1.17.1) (2026-09-27)
+
+
+### Changed
+
+* rename go-product-search → quarryn and scrub for public release ([#89](https://github.com/anatolykoptev/quarryn/issues/89)) ([f0f58cf](https://github.com/anatolykoptev/quarryn/commit/f0f58cfd5cf9e6421524952d79e8bd14f36d3d2a))
+
+
+### Documentation
+
+* add Apache-2.0 license ([8230a1e](https://github.com/anatolykoptev/quarryn/commit/8230a1e9bbfa6dd8b2cc87da4c30c071e75ec1bf))
+* add PRODUCT.md — vision, pillars, positioning, monetization ([3c96dc0](https://github.com/anatolykoptev/quarryn/commit/3c96dc028f73401896a484bfbac2b6d8dff6b82e))
+* release documentation pack ([#88](https://github.com/anatolykoptev/quarryn/issues/88)) ([14fc71b](https://github.com/anatolykoptev/quarryn/commit/14fc71bd984d9d7b9b7583a4d8766e387ddf67dd))
+
 ## [1.17.0](https://github.com/anatolykoptev/quarryn/compare/v1.16.1...v1.17.0) (2026-09-27)
 
 
