@@ -90,10 +90,11 @@ func (s *Store) Get(ctx context.Context, id int64) (Watch, error) {
 	return scanWatch(row)
 }
 
-// Cancel flips a watch to cancelled; returns whether a row existed.
+// Cancel flips a watch to cancelled from any non-terminal status —
+// an unverifiable/expired watch is cancellable too; only cancelled is final.
 func (s *Store) Cancel(ctx context.Context, id int64) (bool, error) {
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE watches SET status='cancelled' WHERE id=$1 AND status='active'`, id)
+		`UPDATE watches SET status='cancelled' WHERE id=$1 AND status<>'cancelled'`, id)
 	return tag.RowsAffected() > 0, err
 }
 
