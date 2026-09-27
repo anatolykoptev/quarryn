@@ -83,11 +83,14 @@ type Config struct {
 	// JSONL file; set → Postgres is the primary sink with the file as
 	// write-failure fallback.
 	DatabaseURL string
-	// WatchNotifyURL is the notification endpoint (an Alertmanager v4
-	// alertmanager webhook); WatchTick/WatchMaxPerTick bound the checker.
-	WatchNotifyURL  string
-	WatchTick       time.Duration
-	WatchMaxPerTick int
+	// WatchNotifyURL is the notification endpoint; WatchNotifyFormat picks
+	// the payload shape — "alertmanager" (v4 webhook, default) or "json"
+	// (flat JSON body for ntfy/Gotify/custom sinks, issue #99).
+	// WatchTick/WatchMaxPerTick bound the checker.
+	WatchNotifyURL    string
+	WatchNotifyFormat string
+	WatchTick         time.Duration
+	WatchMaxPerTick   int
 
 	// ToolTimeout is the default per-tool deadline; SearchToolTimeout and
 	// MatchToolTimeout override it for the product_search / product_match
@@ -138,6 +141,7 @@ func Load() Config {
 		FeedbackFile:      env.Str("FEEDBACK_FILE", "/var/lib/quarryn/feedback.jsonl"),
 		DatabaseURL:       env.Str("DATABASE_URL", ""),
 		WatchNotifyURL:    env.Str("WATCH_NOTIFY_URL", ""),
+		WatchNotifyFormat: env.Str("WATCH_NOTIFY_FORMAT", "alertmanager"),
 		WatchTick:         env.Duration("WATCH_TICK", 15*time.Minute),
 		WatchMaxPerTick:   env.Int("WATCH_MAX_PER_TICK", 10),
 		ToolTimeout:       env.Duration("TOOL_TIMEOUT", 90*time.Second),
