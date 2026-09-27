@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0](https://github.com/anatolykoptev/quarryn/compare/v1.18.1...v1.19.0) (2026-09-27)
+
+
+### Added
+
+* **watch:** generic JSON webhook notifier (WATCH_NOTIFY_FORMAT=json) ([#104](https://github.com/anatolykoptev/quarryn/issues/104)) ([3c46f64](https://github.com/anatolykoptev/quarryn/commit/3c46f648c053991a2b093d657746830d5748d11a))
+
 ## [1.18.1](https://github.com/anatolykoptev/quarryn/compare/v1.18.0...v1.18.1) (2026-09-27)
 
 
