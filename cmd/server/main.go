@@ -140,6 +140,8 @@ func toolTimeouts(cfg config.Config) map[string]time.Duration {
 		"product_search": cfg.SearchToolTimeout,
 		// product_match = jeff-only scoring of a supplied candidate set.
 		"product_match": cfg.MatchToolTimeout,
+		// check_now on a query watch is a full pipeline run — same tier.
+		"product_watch": cfg.SearchToolTimeout,
 	}
 }
 
