@@ -42,6 +42,7 @@ type deps struct {
 	trust      *trust.Provider
 	watchStore watchStorer
 	checker    *watch.Checker
+	orderStore orderStorer
 	initErr    error
 }
 
@@ -55,7 +56,7 @@ type deps struct {
 // RESTBridge auto-exposes the tools under /api/tools/*; the feedback tool
 // additionally answers on POST /api/v1/feedback (registered in main.go,
 // same store).
-func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, feedback *FeedbackStore, prober *probe.Runner, watchStore watchStorer, checker *watch.Checker, initErr error) {
+func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, feedback *FeedbackStore, prober *probe.Runner, watchStore watchStorer, checker *watch.Checker, orderStore orderStorer, initErr error) {
 	d := deps{
 		searcher: searcher,
 		weights: rank.Weights{
@@ -74,6 +75,7 @@ func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config
 	registerProductSearch(srv, d)
 	registerProductMatch(srv, d)
 	registerProductWatch(srv, d)
+	registerProductOrder(srv, d)
 	registerProductFeedback(srv, d)
 	registerProductProbe(srv, d)
 }
