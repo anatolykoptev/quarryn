@@ -12,7 +12,10 @@ import (
 // are lifted into typed fields here — the single decode site, so adapters
 // never format for humans and consumers never parse strings.
 type Candidate struct {
-	Source       string   `json:"source"`
+	Source string `json:"source"`
+	// OfferID is the stable offer identity (see OfferID func): resolvable
+	// across calls, unlike a URL. Built at decode so every consumer sees it.
+	OfferID      string   `json:"offer_id,omitempty"`
 	Title        string   `json:"title"`
 	URL          string   `json:"url"`
 	Content      string   `json:"content,omitempty"`
@@ -51,6 +54,7 @@ var liftedKeys = map[string]struct{}{
 func candidateFromResult(r sources.Result) Candidate {
 	c := Candidate{
 		Source:       r.Metadata[MetaSource],
+		OfferID:      OfferID(r),
 		Title:        r.Title,
 		URL:          r.URL,
 		Content:      r.Content,

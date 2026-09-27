@@ -30,6 +30,7 @@ type briefFinalist struct {
 	URL        string   `json:"url"`
 	BuyURL     string   `json:"buy_url,omitempty"`
 	Adapter    string   `json:"adapter"`
+	OfferID    string   `json:"offer_id,omitempty"`
 	Price      *float64 `json:"price,omitempty"`
 	PriceMinor *int64   `json:"price_minor,omitempty"`
 	Currency   string   `json:"currency,omitempty"`
@@ -76,6 +77,7 @@ func composeBrief(query string, plan match.Plan, ranked []rank.Result, sources [
 				URL:        jc.URL,
 				BuyURL:     jc.Product.BuyURL,
 				Adapter:    jc.Source,
+				OfferID:    pub.OfferID,
 				Price:      pub.Price,
 				PriceMinor: pub.PriceMinor,
 				Currency:   pub.Currency,

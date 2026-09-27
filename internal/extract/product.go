@@ -49,7 +49,11 @@ type Product struct {
 	ImageURL     string   `json:"image_url,omitempty"`
 	Description  string   `json:"description,omitempty"`
 	Source       string   `json:"source"` // product-page domain, www stripped
-	Method       string   `json:"method"`
+	// OfferID is the stable offer identity carried from the candidate
+	// (adapter-scoped listing id or url-hash fallback). Not merged from
+	// detail extraction — identity is fixed at the SERP boundary.
+	OfferID string `json:"offer_id,omitempty"`
+	Method  string `json:"method"`
 	// BuyURL is the resolved merchant URL captured when the interact tier
 	// followed a deal aggregator's outbound tracker (slickdeals /click).
 	// Distinct from URL (the listing/thread address) — this is where the
@@ -105,6 +109,7 @@ type PublicProduct struct {
 	Condition        string   `json:"condition,omitempty"`
 	Rating           *float64 `json:"rating,omitempty"`
 	Source           string   `json:"source"`
+	OfferID          string   `json:"offer_id,omitempty"`
 	DescriptionBlurb string   `json:"description_blurb,omitempty"`
 }
 
@@ -121,6 +126,7 @@ func (p Product) ProductPublic() PublicProduct {
 		Condition:        p.Condition,
 		Rating:           p.Rating,
 		Source:           p.Source,
+		OfferID:          p.OfferID,
 		DescriptionBlurb: sanitizeBlurb(p.Description),
 	}
 }
