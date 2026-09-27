@@ -45,7 +45,7 @@ func handleProductMatch(ctx context.Context, d deps, in productMatchInput) (*mcp
 	}
 	return jsonResult(matchOutput{
 		RequestID:     out.RequestID,
-		Result:        project(ranked[0]),
+		Result:        project(ranked[0], d.trust),
 		Degraded:      out.Degraded,
 		DegradeReason: out.DegradeReason,
 	})

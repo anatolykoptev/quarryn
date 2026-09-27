@@ -4,6 +4,7 @@ import (
 	"github.com/anatolykoptev/go-product-search/internal/match"
 	"github.com/anatolykoptev/go-product-search/internal/rank"
 	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
+	"github.com/anatolykoptev/go-product-search/internal/trust"
 )
 
 // Code composes the brief, never the model (ADR-3's judge decides fit;
@@ -33,6 +34,7 @@ type briefFinalist struct {
 	PriceMinor *int64   `json:"price_minor,omitempty"`
 	Currency   string   `json:"currency,omitempty"`
 	Score      float64  `json:"score"`
+	Trust      string   `json:"trust,omitempty"`
 }
 
 // briefDropped is one appendix line: what left the funnel and why. Code is
@@ -50,7 +52,7 @@ type briefDropped struct {
 // the top few winners stops being a brief.
 const briefFinalistsCap = 5
 
-func composeBrief(query string, plan match.Plan, ranked []rank.Result, sources []pssources.SourceStatus) *searchBrief {
+func composeBrief(query string, plan match.Plan, ranked []rank.Result, sources []pssources.SourceStatus, tp *trust.Provider) *searchBrief {
 	b := &searchBrief{
 		Query:       query,
 		Constraints: plan.Constraints,
@@ -78,6 +80,7 @@ func composeBrief(query string, plan match.Plan, ranked []rank.Result, sources [
 				PriceMinor: pub.PriceMinor,
 				Currency:   pub.Currency,
 				Score:      r.Score,
+				Trust:      string(tp.ClassifyMerchant(jc.Product.BuyURL, jc.URL)),
 			})
 		case jc.Excluded:
 			b.Excluded = append(b.Excluded, briefDropped{

@@ -8,6 +8,7 @@ import (
 	"github.com/anatolykoptev/go-product-search/internal/probe"
 	"github.com/anatolykoptev/go-product-search/internal/rank"
 	"github.com/anatolykoptev/go-product-search/internal/search"
+	"github.com/anatolykoptev/go-product-search/internal/trust"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -37,6 +38,7 @@ type deps struct {
 	passMin  float64
 	feedback *FeedbackStore
 	prober   *probe.Runner
+	trust    *trust.Provider
 	initErr  error
 }
 
@@ -61,6 +63,7 @@ func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config
 		passMin:  cfg.JeffMatchMin,
 		feedback: feedback,
 		prober:   prober,
+		trust:    trust.New(cfg.TrustAllow, cfg.TrustDeny),
 		initErr:  initErr,
 	}
 	registerProductSearch(srv, d)

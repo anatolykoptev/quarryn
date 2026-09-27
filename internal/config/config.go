@@ -24,6 +24,10 @@ type Config struct {
 	// request except GET /healthz (Authorization: Bearer <secret>). Empty
 	// fails closed: every non-open route returns 401.
 	InternalSecret string
+	// TrustAllow/TrustDeny seed the trust provider's operator lists —
+	// CSV of base domains (TRUST_ALLOW_DOMAINS=crutchfield.com,…).
+	TrustAllow []string
+	TrustDeny  []string
 
 	// RedisURL enables the optional L2 caches. Empty = L1-only.
 	RedisURL string
@@ -101,6 +105,8 @@ func Load() Config {
 		JeffURL:           env.Str("JEFF_URL", "https://jeff.krolik.tools"),
 		JeffToken:         env.Str("JEFF_TOKEN", ""),
 		InternalSecret:    env.Str("INTERNAL_SERVICE_SECRET", ""),
+		TrustAllow:        env.List("TRUST_ALLOW_DOMAINS", ""),
+		TrustDeny:         env.List("TRUST_DENY_DOMAINS", ""),
 		RedisURL:          env.Str("REDIS_URL", ""),
 		JeffMatchMin:      env.Float("JEFF_MATCH_MIN", 0.55),
 		MaxJeffCandidates: env.Int("MAX_JEFF_CANDIDATES", 20),
