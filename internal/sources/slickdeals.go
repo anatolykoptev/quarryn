@@ -132,6 +132,9 @@ func (a *slickdealsAdapter) Search(ctx context.Context, q sources.Query) ([]sour
 		} else if m := slickdealsMerchantBBRe.FindStringSubmatch(it.Description); len(m) == 2 {
 			md[MetaMerchant] = m[1]
 		}
+		if cond := dealCondition(it.Title); cond != "" {
+			md[MetaCondition] = cond
+		}
 		md[MetaAvailability] = AvailabilityInStock // frontpage deals are live
 		out = append(out, sources.Result{
 			Title:    strings.TrimSpace(it.Title),
@@ -141,6 +144,37 @@ func (a *slickdealsAdapter) Search(ctx context.Context, q sources.Query) ([]sour
 		})
 	}
 	return out, nil
+}
+
+// dealConditionRe scans deal titles for condition markers — slickdeals
+// puts "(refurbished)", "open-box", "pre-owned" right in the title, and
+// that changes the verdict for "new-only" asks. Checked first-match: a
+// "Refurbished — Like New" title stays refurb.
+var dealConditionRe = regexp.MustCompile(`(?i)\b(for[ _-]?parts|refurbished|refurb|renewed|open[ _-]?box|pre[ _-]?owned|preowned|like[ _-]new|scratch[ _-](?:and|&)\s*dent|used|damaged)\b`)
+
+// dealCondition maps the first title marker to a raw token that
+// extract's normalizeCondition understands — final enum mapping happens
+// at the extraction edge, same as for every other source's raw text.
+func dealCondition(title string) string {
+	m := dealConditionRe.FindString(strings.ToLower(title))
+	switch {
+	case m == "":
+		return ""
+	case strings.Contains(m, "part"):
+		return "for_parts"
+	case strings.Contains(m, "refurb"), m == "renewed":
+		return "refurbished"
+	case strings.Contains(m, "open"):
+		return "open_box"
+	case strings.Contains(m, "owned"):
+		return "used"
+	case strings.Contains(m, "like"):
+		return "like_new"
+	case strings.Contains(m, "scratch"):
+		return "damaged"
+	default:
+		return m // "used", "damaged"
+	}
 }
 
 // dealPrice picks the price a buyer would pay: the post-discount "= $X"

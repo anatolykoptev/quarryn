@@ -74,6 +74,7 @@ type etsyListing struct {
 	Description string `json:"description"`
 	State       string `json:"state"`
 	Quantity    int    `json:"quantity"`
+	IsVintage   bool   `json:"is_vintage"`
 	ShopID      int64  `json:"shop_id"`
 	Price       struct {
 		Amount       int64  `json:"amount"`
@@ -137,6 +138,9 @@ func etsyResult(it etsyListing) sources.Result {
 		md[MetaPrice] = strconv.FormatFloat(
 			float64(it.Price.Amount)/float64(it.Price.Divisor), 'f', -1, 64)
 		md[MetaCurrency] = it.Price.CurrencyCode
+	}
+	if it.IsVintage {
+		md[MetaCondition] = "vintage"
 	}
 	if it.Quantity > 0 && it.State == "active" {
 		md[MetaAvailability] = AvailabilityInStock

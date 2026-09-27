@@ -25,7 +25,7 @@ const slickdealsRSSFixture = `<?xml version="1.0" encoding="UTF-8"?>
       <pubDate>Tue, 23 Sep 2026 10:00:00 -0700</pubDate>
     </item>
     <item>
-      <title>75" Hisense U8 Mini-LED 4K TV $999.99</title>
+      <title>75" Hisense U8 Mini-LED 4K TV (Refurbished) $999.99</title>
       <link>https://slickdeals.net/f/18274001-hisense-u8</link>
       <description><![CDATA[Best Buy has 75" Hisense U8 for $999.99. 38 thumbs up.]]></description>
       <pubDate>Tue, 23 Sep 2026 09:30:00 -0700</pubDate>
@@ -129,6 +129,54 @@ func TestSlickdealsParsesRSS(t *testing.T) {
 	}
 	if got := res[1].Metadata[MetaPrice]; got != "999.99" {
 		t.Errorf("res[1] price = %q", got)
+	}
+}
+
+// TestSlickdealsConditionMetadata: a "(Refurbished)" title marker
+// surfaces as raw condition metadata; clean titles carry none.
+// extract normalizes the token to the enum downstream.
+func TestSlickdealsConditionMetadata(t *testing.T) {
+	srv := newWowaFakeServer(t, map[string]string{
+		"slickdeals.net": slickdealsRSSFixture,
+	}, nil)
+	defer srv.Close()
+
+	wc, err := wowa.NewClient(srv.URL)
+	if err != nil {
+		t.Fatalf("wowa client: %v", err)
+	}
+	res, err := NewSlickdeals(wc, "").Search(t.Context(), sources.Query{Text: "tv"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) != 4 {
+		t.Fatalf("got %d results", len(res))
+	}
+	if got := res[1].Metadata[MetaCondition]; got != "refurbished" {
+		t.Errorf("refurb title condition = %q", got)
+	}
+	if _, ok := res[0].Metadata[MetaCondition]; ok {
+		t.Errorf("clean title got condition %q", res[0].Metadata[MetaCondition])
+	}
+}
+
+// TestDealCondition locks the title-marker table: raw tokens feed
+// extract's normalizeCondition, never the enum directly.
+func TestDealCondition(t *testing.T) {
+	cases := map[string]string{
+		"Dyson V8 (Refurbished) $199":          "refurbished",
+		"Samsung Frame TV — open-box $899":     "open_box",
+		"Apple Watch pre-owned $149":           "used",
+		"iPhone 12 for parts $40":              "for_parts",
+		"Like New Kindle Paperwhite $70":       "like_new",
+		"scratch and dent appliance sale":      "damaged",
+		"Sony WH-1000XM5 $278 + Free Shipping": "",
+		`75" TV "used to be" a deal`:           "used",
+	}
+	for title, want := range cases {
+		if got := dealCondition(title); got != want {
+			t.Errorf("dealCondition(%q) = %q, want %q", title, got, want)
+		}
 	}
 }
 

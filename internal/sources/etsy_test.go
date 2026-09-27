@@ -29,6 +29,7 @@ const etsyFixture = `{
       "url": "https://www.etsy.com/listing/1501999887/vintage-enamel-mug",
       "state": "active",
       "quantity": 0,
+      "is_vintage": true,
       "shop_id": 7712001,
       "price": {"amount": 1899, "divisor": 100, "currency_code": "USD"}
     }
@@ -88,6 +89,26 @@ func TestEtsySearchParsesListings(t *testing.T) {
 	// quantity=0 → out_of_stock
 	if got := res[1].Metadata[MetaAvailability]; got != AvailabilityOutOfStock {
 		t.Errorf("res[1] availability = %q", got)
+	}
+	// is_vintage maps to the raw token; extract folds it to "used".
+	if got := res[1].Metadata[MetaCondition]; got != "vintage" {
+		t.Errorf("res[1] condition = %q", got)
+	}
+}
+
+func TestEtsyConditionAbsentWhenNotVintage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(etsyFixture))
+	}))
+	defer srv.Close()
+
+	res, err := NewEtsy("k", "s", srv.URL, srv.Client()).Search(t.Context(), sources.Query{Text: "mug"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if _, ok := res[0].Metadata[MetaCondition]; ok {
+		t.Errorf("non-vintage got condition %q", res[0].Metadata[MetaCondition])
 	}
 }
 

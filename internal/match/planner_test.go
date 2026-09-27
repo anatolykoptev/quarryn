@@ -60,6 +60,23 @@ func assertSplitConstraints(t *testing.T, c Constraints) {
 	}
 }
 
+func TestPlanCriteriaCondition(t *testing.T) {
+	plan, err := PlanCriteria([]string{"condition:LIKE_NEW", "comfortable"})
+	if err != nil {
+		t.Fatalf("PlanCriteria: %v", err)
+	}
+	if plan.Constraints.Condition != "like_new" {
+		t.Fatalf("condition = %q, want like_new (case-folded)", plan.Constraints.Condition)
+	}
+	if len(plan.Questions) != 1 || plan.Questions[0].Criterion != "comfortable" {
+		t.Fatalf("questions = %+v", plan.Questions)
+	}
+	// Unknown enum value fails the whole call — same rule as availability.
+	if _, err := PlanCriteria([]string{"condition:minty"}); err == nil {
+		t.Fatal("bogus condition accepted")
+	}
+}
+
 func TestPlanCriteriaRejectsOverCap(t *testing.T) {
 	_, err := PlanCriteria([]string{strings.Repeat("x", maxCriterionLen+1)})
 	if !errors.Is(err, ErrCriterionTooLong) {

@@ -36,6 +36,29 @@ func TestPrefilterCurrencyMismatch(t *testing.T) {
 	}
 }
 
+func TestPrefilterCondition(t *testing.T) {
+	p := baseProduct() // Condition: "new"
+	got, detail := checkCandidate(p, Constraints{Condition: "used"})
+	if got != ExclConditionMismatch {
+		t.Fatalf("mismatch: got %q", got)
+	}
+	if !strings.Contains(detail, `"new"`) || !strings.Contains(detail, `"used"`) {
+		t.Fatalf("detail names both values, got %q", detail)
+	}
+	if got, _ := checkCandidate(p, Constraints{Condition: "new"}); got != "" {
+		t.Fatalf("match rejected: %q", got)
+	}
+	// Unknown product condition cannot satisfy a stated constraint.
+	p.Condition = ""
+	if got, _ := checkCandidate(p, Constraints{Condition: "new"}); got != ExclConditionMismatch {
+		t.Fatalf("unknown condition waived through: got %q", got)
+	}
+	// No constraint → condition (or its absence) is not a prefilter problem.
+	if got, _ := checkCandidate(p, Constraints{Currency: "USD"}); got != "" {
+		t.Fatalf("constraint-free rejected: %q", got)
+	}
+}
+
 func TestPrefilterPriceBounds(t *testing.T) {
 	p := baseProduct()
 	if got, _ := checkCandidate(p, Constraints{PriceMax: f64(200)}); got != ExclPriceAboveMax {
