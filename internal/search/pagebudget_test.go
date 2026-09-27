@@ -60,7 +60,7 @@ func TestSearchPageBudgetStopsDetailFetches(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	// Budget 2 = 1 serp feed fetch + 1 detail fetch.
-	s, err := New(config.Config{WowaURL: srv.URL, MaxPagesPerSearch: 2})
+	s, err := New(config.Config{WowaURL: srv.URL, MaxPagesPerSearch: 2}, allowAllHosts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestSearchNoPageBudgetIsUnbounded(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	s, err := New(config.Config{WowaURL: srv.URL})
+	s, err := New(config.Config{WowaURL: srv.URL}, allowAllHosts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

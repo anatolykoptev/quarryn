@@ -56,7 +56,15 @@ func NewEtsy(apiKey, sharedSecret, baseURL string, httpClient *http.Client) Adap
 func (a *etsyAdapter) Name() string { return "etsy" }
 
 // Spec implements Adapter.
-func (a *etsyAdapter) Spec() SourceSpec { return SourceSpec{FetchClass: FetchClassAPI} }
+func (a *etsyAdapter) Spec() SourceSpec {
+	return SourceSpec{
+		FetchClass: FetchClassAPI,
+		Manifest: Manifest{
+			ID:           a.Name(),
+			AllowedHosts: []string{"etsy.com", "*.etsy.com"},
+		},
+	}
+}
 
 // Enabled implements Adapter — the adapter ships dark without an API key.
 func (a *etsyAdapter) Enabled() bool { return a.apiKey != "" }

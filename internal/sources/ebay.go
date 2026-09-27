@@ -92,7 +92,15 @@ func NewEBay(clientID, clientSecret, baseURL string, httpClient *http.Client, op
 func (a *ebayAdapter) Name() string { return "ebay" }
 
 // Spec implements Adapter.
-func (a *ebayAdapter) Spec() SourceSpec { return SourceSpec{FetchClass: FetchClassAPI} }
+func (a *ebayAdapter) Spec() SourceSpec {
+	return SourceSpec{
+		FetchClass: FetchClassAPI,
+		Manifest: Manifest{
+			ID:           a.Name(),
+			AllowedHosts: []string{"ebay.com", "*.ebay.com"},
+		},
+	}
+}
 
 // Enabled implements Adapter — the adapter ships dark without credentials.
 func (a *ebayAdapter) Enabled() bool {

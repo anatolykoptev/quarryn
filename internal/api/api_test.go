@@ -122,7 +122,7 @@ func jeffStub(t *testing.T, probs map[string]float64) *httptest.Server {
 
 func testDeps(t *testing.T, cfg config.Config) deps {
 	t.Helper()
-	s, err := search.New(cfg)
+	s, err := search.New(cfg, pssources.WithManifestGate(func(pssources.Manifest, string) bool { return true }))
 	if err != nil {
 		t.Fatalf("search.New: %v", err)
 	}

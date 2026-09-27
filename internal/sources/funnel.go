@@ -62,6 +62,10 @@ type Funnel struct {
 	maxParallel    int
 	dedupThreshold float64
 	checkURL       func(ctx context.Context, rawURL string) error
+	// manifestAllowed gates result URLs on the adapter's declared
+	// manifest. Optionable like checkURL: tests keep TEST-NET fixture
+	// URLs flowing through real adapters by allowing all hosts.
+	manifestAllowed func(m Manifest, rawURL string) bool
 }
 
 // FunnelOption configures a Funnel.
@@ -96,6 +100,16 @@ func WithURLChecker(fn func(ctx context.Context, rawURL string) error) FunnelOpt
 	}
 }
 
+// WithManifestGate overrides the adapter-manifest host check. Prod keeps
+// the default; tests that feed TEST-NET fixture URLs through real
+// adapters pass an allow-all gate (the SSRF check stays fully live —
+// literal IPs don't need it stubbed).
+func WithManifestGate(fn func(m Manifest, rawURL string) bool) FunnelOption {
+	return func(f *Funnel) {
+		f.manifestAllowed = fn
+	}
+}
+
 // NewFunnel builds the sourcing funnel over the registry's adapters.
 func NewFunnel(adapters map[string]Adapter, opts ...FunnelOption) *Funnel {
 	f := &Funnel{
@@ -104,6 +118,9 @@ func NewFunnel(adapters map[string]Adapter, opts ...FunnelOption) *Funnel {
 		maxParallel:    defaultMaxParallel,
 		dedupThreshold: defaultDedupThreshold,
 		checkURL:       httputil.CheckRawURL,
+		manifestAllowed: func(m Manifest, rawURL string) bool {
+			return m.AllowsURL(rawURL)
+		},
 	}
 	for _, o := range opts {
 		o(f)
@@ -209,6 +226,12 @@ func (f *Funnel) collect(ctx context.Context, a Adapter, q sources.Query) (Sourc
 	for _, r := range res {
 		if r.URL == "" {
 			rejected++
+			continue
+		}
+		if !f.manifestAllowed(a.Spec().Manifest, r.URL) {
+			rejected++
+			slog.Info("candidate rejected: URL outside adapter manifest",
+				slog.String("source", name), slog.String("url", r.URL))
 			continue
 		}
 		// Tracking params carry no product identity — strip them at the
