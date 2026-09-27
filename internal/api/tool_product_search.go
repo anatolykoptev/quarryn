@@ -5,6 +5,7 @@ import (
 
 	mcpserver "github.com/anatolykoptev/go-mcpserver"
 	"github.com/anatolykoptev/go-product-search/internal/rank"
+	"github.com/anatolykoptev/go-product-search/internal/trust"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -56,21 +57,22 @@ func handleProductSearch(ctx context.Context, d deps, in productSearchInput) (*m
 		if i >= limit {
 			break
 		}
-		resp.Results = append(resp.Results, project(r))
+		resp.Results = append(resp.Results, project(r, d.trust))
 	}
-	resp.Brief = composeBrief(in.Query, out.Plan, ranked, out.Sources)
+	resp.Brief = composeBrief(in.Query, out.Plan, ranked, out.Sources, d.trust)
 	return jsonResult(resp)
 }
 
 // project maps one ranked candidate to the egress-safe result shape.
 // PublicProduct is the only product data that may leave the box; the
 // listing URL and adapter name ride alongside it.
-func project(r rank.Result) productResult {
+func project(r rank.Result, tp *trust.Provider) productResult {
 	jc := r.Judged
 	return productResult{
 		URL:             jc.URL,
 		Adapter:         jc.Source,
 		BuyURL:          jc.Product.BuyURL,
+		Trust:           string(tp.ClassifyMerchant(jc.Product.BuyURL, jc.URL)),
 		PublicProduct:   jc.ProductPublic(),
 		Score:           r.Score,
 		Confidence:      r.Confidence,

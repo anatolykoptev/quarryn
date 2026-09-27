@@ -7,6 +7,7 @@ import (
 	"github.com/anatolykoptev/go-product-search/internal/match"
 	"github.com/anatolykoptev/go-product-search/internal/rank"
 	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
+	"github.com/anatolykoptev/go-product-search/internal/trust"
 )
 
 func i64p(v int64) *int64 { return &v }
@@ -48,7 +49,7 @@ func TestBriefGroupsEveryCandidate(t *testing.T) {
 
 	ranked := append([]rank.Result{rankedPassed("http://x.example/win", 0.9)},
 		excluded, unjudged, rejected)
-	b := composeBrief("q", match.Plan{}, ranked, nil)
+	b := composeBrief("q", match.Plan{}, ranked, nil, trust.New(nil, nil))
 
 	if len(b.Finalists) != 1 || b.Finalists[0].URL != "http://x.example/win" {
 		t.Fatalf("finalists: %+v", b.Finalists)
@@ -74,7 +75,7 @@ func TestBriefFinalistCapDoesNotReject(t *testing.T) {
 	for i := 0; i < 7; i++ {
 		ranked = append(ranked, rankedPassed("http://x.example/w"+string(rune('a'+i)), 0.9))
 	}
-	b := composeBrief("q", match.Plan{}, ranked, nil)
+	b := composeBrief("q", match.Plan{}, ranked, nil, trust.New(nil, nil))
 	if len(b.Finalists) != 5 || len(b.Rejected) != 0 {
 		t.Fatalf("cap must clip finalists silently, not rebrand them: f=%d r=%d",
 			len(b.Finalists), len(b.Rejected))
@@ -91,7 +92,7 @@ func TestBriefEchoesInterpretation(t *testing.T) {
 		Questions:   []match.Question{{ID: "c0", Criterion: "good sound"}},
 	}
 	cov := []pssources.SourceStatus{{Name: "ebay", Outcome: "ok", Count: 3}}
-	b := composeBrief("jbl speaker", plan, nil, cov)
+	b := composeBrief("jbl speaker", plan, nil, cov, trust.New(nil, nil))
 	if b.Query != "jbl speaker" || b.Constraints.Currency != "USD" ||
 		len(b.Subjective) != 1 || b.Subjective[0] != "good sound" ||
 		len(b.Coverage) != 1 || b.Coverage[0].Name != "ebay" {
