@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anatolykoptev/go-product-search/internal/postgres"
 )
 
 // feedback field caps bound the log line a single call can emit — feedback
@@ -30,7 +33,8 @@ const (
 type FeedbackStore struct {
 	mu   sync.Mutex
 	path string
-	f    *os.File // nil → log-only mode
+	f    *os.File     // nil → log-only mode
+	pg   *postgres.DB // non-nil → Postgres is the primary sink
 	now  func() time.Time
 }
 
@@ -67,15 +71,39 @@ func NewFeedbackStore(path string) *FeedbackStore {
 	return s
 }
 
+// NewFeedbackStorePG is NewFeedbackStore with a Postgres primary sink
+// (DATABASE_URL wired). File/log remains as the loud fallback when a pg
+// write fails — outcome data is calibration input, better duplicated
+// than lost.
+func NewFeedbackStorePG(path string, db *postgres.DB) *FeedbackStore {
+	s := NewFeedbackStore(path)
+	s.pg = db
+	slog.Info("feedback: primary sink is postgres")
+	return s
+}
+
 // Append writes one record. A write failure is logged loudly AND returned —
 // "log write failures, never silent". In log-only mode the record is an
 // INFO log line and nil is returned (the feedback is captured, just not on
 // disk).
 func (s *FeedbackStore) Append(rec feedbackRecord) error {
-	rec.TS = s.now().UTC().Format(time.RFC3339)
+	ts := s.now().UTC()
+	rec.TS = ts.Format(time.RFC3339)
 	line, err := json.Marshal(rec)
 	if err != nil {
 		return err // impossible for this shape; still reported
+	}
+	if s.pg != nil {
+		// Bounded: feedback is a sink, not the request's critical path.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := s.pg.AppendFeedback(ctx, ts, rec.RequestID, rec.PickedURL, rec.Verdict)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		// Loud fallback: record the failure AND keep the row on disk.
+		slog.Error("feedback: pg write failed — falling back to file",
+			slog.Any("error", err))
 	}
 	if s.f == nil {
 		slog.Info("feedback",

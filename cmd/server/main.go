@@ -15,6 +15,7 @@ import (
 	"github.com/anatolykoptev/go-product-search/internal/api"
 	"github.com/anatolykoptev/go-product-search/internal/auth"
 	"github.com/anatolykoptev/go-product-search/internal/config"
+	"github.com/anatolykoptev/go-product-search/internal/postgres"
 	"github.com/anatolykoptev/go-product-search/internal/probe"
 	"github.com/anatolykoptev/go-product-search/internal/search"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -40,7 +41,19 @@ func runMCPServer(cfg config.Config) error {
 	// The ADR-10 outcome sink is built once and shared by the
 	// product_feedback tool and the POST /api/v1/feedback REST twin.
 	// Unwritable path → log-only mode, never fatal.
-	feedback := api.NewFeedbackStore(cfg.FeedbackFile)
+	var pgdb *postgres.DB
+	if cfg.DatabaseURL != "" {
+		db, err := postgres.New(context.Background(), cfg.DatabaseURL)
+		if err != nil {
+			// The outcome sink is not worth killing the service over —
+			// degrade to the JSONL path and say so loudly.
+			slog.Error("postgres unavailable — feedback falls back to JSONL",
+				slog.Any("error", err))
+		} else {
+			pgdb = db
+		}
+	}
+	feedback := api.NewFeedbackStorePG(cfg.FeedbackFile, pgdb)
 	hooks := mcpserver.MCPHooks{
 		OnToolResult: func(_ context.Context, name string, dur time.Duration, isErr bool) {
 			slog.Info("tool_result", slog.String("tool", name),

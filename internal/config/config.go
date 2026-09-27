@@ -78,6 +78,11 @@ type Config struct {
 	// An unwritable path degrades to log-only (records logged, not
 	// persisted).
 	FeedbackFile string
+	// DatabaseURL points at the fleet-shared Postgres (postgres:5432 on
+	// the backend net). Empty → the feedback outcome sink stays on the
+	// JSONL file; set → Postgres is the primary sink with the file as
+	// write-failure fallback.
+	DatabaseURL string
 
 	// ToolTimeout is the default per-tool deadline; SearchToolTimeout and
 	// MatchToolTimeout override it for the product_search / product_match
@@ -126,6 +131,7 @@ func Load() Config {
 		MaxPagesPerSearch: env.Int("MAX_PAGES_PER_SEARCH", 30),
 		DomainMinInterval: time.Duration(env.Int("DOMAIN_MIN_INTERVAL_MS", 2000)) * time.Millisecond,
 		FeedbackFile:      env.Str("FEEDBACK_FILE", "/var/lib/go-product-search/feedback.jsonl"),
+		DatabaseURL:       env.Str("DATABASE_URL", ""),
 		ToolTimeout:       env.Duration("TOOL_TIMEOUT", 90*time.Second),
 		// product_search runs a wowa scrape (page loads are slow) and then
 		// jeff matching, so it gets the long tier.
