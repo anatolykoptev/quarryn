@@ -6,6 +6,7 @@
   "packages": {
     ".": {
       "release-type": "go",
+      "extra-files": ["cmd/server/main.go"],
       "changelog-sections": [
         { "type": "feat",     "section": "Added" },
         { "type": "fix",      "section": "Fixed" },

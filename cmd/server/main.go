@@ -24,7 +24,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var version = "dev"
+// version is the release-please-bumped fallback; the Dockerfile overrides it
+// via -ldflags -X when the build context has a usable .git (plain checkout).
+// Dozor worktree builds carry only a .git pointer file, so git describe fails
+// there and this constant is what /healthz reports.
+var version = "1.18.0" // x-release-please-version
 
 func main() {
 	cfg := config.Load()
