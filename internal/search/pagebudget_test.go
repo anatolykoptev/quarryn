@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/anatolykoptev/go-kit/wowa"
-	"github.com/anatolykoptev/go-product-search/internal/config"
+	"github.com/anatolykoptev/quarryn/internal/config"
 )
 
 // rssThreePriceless is a slickdeals-shaped feed whose items carry no price

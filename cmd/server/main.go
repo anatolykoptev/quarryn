@@ -1,4 +1,4 @@
-// go-product-search — product search service: scrapes candidates via go-wowa,
+// quarryn — product search service: scrapes candidates via go-wowa,
 // matches them via the jeff decision service. MCP transport + REST bridge.
 package main
 
@@ -12,14 +12,14 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-mcpserver"
-	"github.com/anatolykoptev/go-product-search/internal/api"
-	"github.com/anatolykoptev/go-product-search/internal/auth"
-	"github.com/anatolykoptev/go-product-search/internal/config"
-	"github.com/anatolykoptev/go-product-search/internal/orders"
-	"github.com/anatolykoptev/go-product-search/internal/postgres"
-	"github.com/anatolykoptev/go-product-search/internal/probe"
-	"github.com/anatolykoptev/go-product-search/internal/search"
-	"github.com/anatolykoptev/go-product-search/internal/watch"
+	"github.com/anatolykoptev/quarryn/internal/api"
+	"github.com/anatolykoptev/quarryn/internal/auth"
+	"github.com/anatolykoptev/quarryn/internal/config"
+	"github.com/anatolykoptev/quarryn/internal/orders"
+	"github.com/anatolykoptev/quarryn/internal/postgres"
+	"github.com/anatolykoptev/quarryn/internal/probe"
+	"github.com/anatolykoptev/quarryn/internal/search"
+	"github.com/anatolykoptev/quarryn/internal/watch"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -49,13 +49,13 @@ func runMCPServer(cfg config.Config) error {
 	}
 	routes := func(mux *http.ServeMux) {
 		// /healthz is the OPEN health probe — the bearer middleware exempts
-		// it so docker healthcheck and dozor smoke checks work without a
+		// it so docker healthcheck and monitoring smoke checks work without a
 		// token. Everything else on this mux requires the bearer secret.
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"status":  "ok",
-				"service": "go-product-search",
+				"service": "quarryn",
 				"version": version,
 			})
 		})
@@ -67,7 +67,7 @@ func runMCPServer(cfg config.Config) error {
 		mux.Handle("POST /api/v1/orders/ingest", api.OrdersIngestHandler(orderStore))
 	}
 	return mcpserver.Serve(&mcp.Implementation{
-		Name:    "go-product-search",
+		Name:    "quarryn",
 		Version: version,
 	}, mcpConfig(cfg, []mcp.Middleware{hooks.Middleware()}, routes), func(srv *mcp.Server) {
 		// The searcher is built once here so the tool closures capture the
@@ -94,11 +94,14 @@ func newWatcher(s *search.Searcher, pgdb *postgres.DB, cfg config.Config, initEr
 		}
 		return nil, nil
 	}
+	if cfg.WatchNotifyURL == "" {
+		slog.Warn("WATCH_NOTIFY_URL unset — watch alerts will keep failing and retrying")
+	}
 	st := watch.NewStore(pgdb.Pool())
 	ch := &watch.Checker{
 		Store:       st,
 		Observer:    watch.NewSearcherObserver(s),
-		Notify:      watch.NewDozorNotifier(cfg.WatchNotifyURL),
+		Notify:      watch.NewAlertmanagerNotifier(cfg.WatchNotifyURL),
 		Tick:        cfg.WatchTick,
 		MaxPerTick:  cfg.WatchMaxPerTick,
 		OfferBudget: 2 * time.Minute,
@@ -164,7 +167,7 @@ func toolTimeouts(cfg config.Config) map[string]time.Duration {
 // generated openapi spec.
 func mcpConfig(cfg config.Config, mcpReceiving []mcp.Middleware, routes func(*http.ServeMux)) mcpserver.Config {
 	return mcpserver.Config{
-		Name:                       "go-product-search",
+		Name:                       "quarryn",
 		Version:                    version,
 		Port:                       cfg.Port,
 		SchemaCache:                mcp.NewSchemaCache(),

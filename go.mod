@@ -1,4 +1,4 @@
-module github.com/anatolykoptev/go-product-search
+module github.com/anatolykoptev/quarryn
 
 go 1.26.3
 

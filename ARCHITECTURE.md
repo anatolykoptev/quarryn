@@ -15,7 +15,7 @@ internal/
   rank            funnel/deal/jeff score fusion
   watch           watches: observer (offer re-fetch / query re-search),
                   checker (tick, 1% bucket, at-least-once ledger),
-                  notify (dozor webhook), Postgres store
+                  notify (Alertmanager webhook), Postgres store
   orders          MIME parse (stdlib, multipart, HTML→text), retailer
                   rules + generic fallback, tracking regex, merge-on-ingest,
                   event ledger, Postgres store
@@ -47,7 +47,7 @@ product_search
 
 - **Watches**: `watch.Store` (PG) + `Checker` (tick loop in main) +
   `Observer` (offer path via `MatchURL`, query path via `SearchDetailed`,
-  hard currency match) + `notify` (dozor). Check ends in a notification
+  hard currency match) + `notify` (Alertmanager webhook). Check ends in a notification
   and nothing else — no purchase path (enforced by architecture test).
 - **Orders**: delivery-agnostic `Ingest(store, rawEML)` — two transports
   (IMAP poller, CF worker) call the same function. Merge on
@@ -59,8 +59,8 @@ product_search
 - All third-party page traffic goes through go-wowa (`WOWA_URL`), except
   api-class adapters (ebay/etsy) hitting first-party JSON over direct
   HTTPS.
-- `dozor` resolves to the backend-net gateway via a compose alias —
-  watches reach the alertmanager webhook at `172.18.0.1:8765`.
+- Watch notifications go only to `WATCH_NOTIFY_URL`, an Alertmanager v4
+  webhook endpoint — typically an internal-network address.
 - Orders package: no egress. Worker/poller ingress: bearer-authed raw
   MIME only.
 

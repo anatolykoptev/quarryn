@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/anatolykoptev/go-product-search/internal/postgres"
+	"github.com/anatolykoptev/quarryn/internal/postgres"
 )
 
 func TestLivePGOrders(t *testing.T) {

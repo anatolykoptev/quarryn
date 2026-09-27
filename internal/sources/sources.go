@@ -1,5 +1,5 @@
 // Package sources implements the candidate-sourcing stage of
-// go-product-search: marketplace adapters (ADR-16) plus the merge/dedup
+// quarryn: marketplace adapters (ADR-16) plus the merge/dedup
 // funnel (ADR-8) that fans a query out to every enabled adapter, SSRF-checks
 // every candidate URL (ADR-14), fuses and dedups the result sets, and caps
 // the pool for downstream scoring.

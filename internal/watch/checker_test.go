@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anatolykoptev/go-product-search/internal/money"
+	"github.com/anatolykoptev/quarryn/internal/money"
 )
 
 // fakeStore records Record calls; the checker's state transitions are the
@@ -134,7 +134,7 @@ func TestDedupeBucket(t *testing.T) {
 // flag overrides dedupe on the next check — even with the same price.
 func TestNotifyRetryAtLeastOnce(t *testing.T) {
 	st := &fakeStore{}
-	nf := &fakeNotifier{err: errors.New("dozor down"), retryAfter: 7 * time.Minute}
+	nf := &fakeNotifier{err: errors.New("notifier down"), retryAfter: 7 * time.Minute}
 	c := &Checker{Store: st, Observer: fakeObserver{okObs(9_000)}, Notify: nf}
 
 	w := baseWatch()

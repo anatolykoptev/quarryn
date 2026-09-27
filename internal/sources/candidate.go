@@ -1,7 +1,7 @@
 package sources
 
 import (
-	"github.com/anatolykoptev/go-product-search/internal/money"
+	"github.com/anatolykoptev/quarryn/internal/money"
 	"strconv"
 
 	"github.com/anatolykoptev/go-engine/sources"

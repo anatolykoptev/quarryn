@@ -55,7 +55,7 @@ Price watches on Postgres. `action`: `add | list | cancel | check_now`.
 | `watch_id` | int | `cancel` / `check_now` target |
 | `include_inactive` | bool | `list`: include cancelled/expired |
 
-Notifications go through the dozor Alertmanager webhook. Offers that stop
+Notifications go through an Alertmanager v4 webhook (`WATCH_NOTIFY_URL`). Offers that stop
 being extractable become `unverifiable` after repeated failures and stop
 consuming budget.
 
@@ -87,10 +87,11 @@ Dedups/merges on `(retailer_domain, order_no)` — re-sent confirmations and
 
 ## Ingest transports (orders)
 
-- **Push**: Cloudflare Email Worker `gps-order-ingest` bound to
-  `orders@krolik.run` POSTs raw MIME to
-  `https://orders.krolik.run/api/v1/orders/ingest`.
-- **Pull**: `gps-orders-imap` systemd timer polls the Gmail `Krolik/orders`
-  label every 3 min and POSTs unseen messages to the same endpoint.
+- **Push**: a Cloudflare Email Worker bound to a dedicated mailbox
+  (`orders@your-domain`) POSTs raw MIME to
+  `https://<host>/api/v1/orders/ingest` with the bearer secret.
+- **Pull**: an IMAP poller (e.g. a systemd timer every 3 min) reads a
+  dedicated mailbox label/folder and POSTs unseen messages to the same
+  endpoint, marking them `\Seen` only after a 2xx — at-least-once.
 
 Both end in `orders.Ingest` — same dedup, same ledger.

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/anatolykoptev/go-kit/cache"
-	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
+	pssources "github.com/anatolykoptev/quarryn/internal/sources"
 )
 
 // CanonicalURL normalizes a candidate URL for cache keys: lowercase scheme
@@ -50,8 +50,8 @@ func CanonicalURL(raw string) string {
 const extractorVersion = "v1"
 
 // cacheKey builds the versioned extraction-cache key (ADR-7): "v1:" +
-// FNV-128a of the canonical URL. The Redis L2 prefix ("prodsearch:") is set
-// at cache construction, so the full Redis key reads "prodsearch:v1:<fnv>".
+// FNV-128a of the canonical URL. The Redis L2 prefix ("quarryn:") is set
+// at cache construction, so the full Redis key reads "quarryn:v1:<fnv>".
 func cacheKey(rawURL string) string {
 	canon := CanonicalURL(rawURL)
 	if canon == "" {

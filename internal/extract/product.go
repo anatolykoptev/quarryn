@@ -13,8 +13,8 @@ package extract
 import (
 	"encoding/json"
 
-	"github.com/anatolykoptev/go-product-search/internal/money"
-	"github.com/anatolykoptev/go-product-search/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/money"
+	"github.com/anatolykoptev/quarryn/internal/sources"
 )
 
 // Method vocabulary — records which extraction path produced a Product.

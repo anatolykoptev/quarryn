@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-kit/retry"
-	"github.com/anatolykoptev/go-product-search/internal/postgres/migrations"
+	"github.com/anatolykoptev/quarryn/internal/postgres/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"

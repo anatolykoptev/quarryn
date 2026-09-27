@@ -6,7 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/anatolykoptev/go-product-search/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/extract"
 )
 
 // TestCandidateStateStripsLineForgery is the injection-safety mutation

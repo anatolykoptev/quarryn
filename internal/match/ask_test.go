@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-kit/jeff"
-	"github.com/anatolykoptev/go-product-search/internal/extract"
-	"github.com/anatolykoptev/go-product-search/internal/money"
+	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/money"
 )
 
 func f64m(v float64) *int64 { m, _ := money.FromFloat(v, "USD"); return &m }

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-kit/jeff"
-	"github.com/anatolykoptev/go-product-search/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/extract"
 )
 
 // perStateAsker returns per-criterion nouls keyed on the candidate state's

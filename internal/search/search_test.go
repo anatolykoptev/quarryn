@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/anatolykoptev/go-kit/wowa"
-	"github.com/anatolykoptev/go-product-search/internal/config"
-	"github.com/anatolykoptev/go-product-search/internal/extract"
-	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/config"
+	"github.com/anatolykoptev/quarryn/internal/extract"
+	pssources "github.com/anatolykoptev/quarryn/internal/sources"
 )
 
 // clearSourceEnv pins every adapter credential env var to empty so the test

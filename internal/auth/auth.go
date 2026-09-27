@@ -1,7 +1,7 @@
 // Package auth provides the inbound bearer-token middleware for
-// go-product-search. Every route on the main mux requires
+// quarryn. Every route on the main mux requires
 // Authorization: Bearer $INTERNAL_SERVICE_SECRET except GET /healthz
-// (docker healthcheck + dozor smoke probe run without a token).
+// (docker healthcheck + monitoring smoke probes run without a token).
 package auth
 
 import (

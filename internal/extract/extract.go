@@ -13,7 +13,7 @@ import (
 
 	"github.com/anatolykoptev/go-kit/cache"
 	"github.com/anatolykoptev/go-kit/wowa"
-	"github.com/anatolykoptev/go-product-search/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/sources"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"golang.org/x/sync/errgroup"
@@ -30,7 +30,7 @@ import (
 // (values rejected by strict validation).
 var extractOutcomes = promauto.NewCounterVec(
 	prometheus.CounterOpts{
-		Namespace: "prodsearch",
+		Namespace: "quarryn",
 		Name:      "extract_outcomes_total",
 		Help:      "Product-extraction disposition per candidate.",
 	},
@@ -474,7 +474,7 @@ func (p *Pipeline) tryInteract(ctx context.Context, rank int, c sources.Candidat
 	}
 	// Named session so the second call (outbound-link resolution) reuses
 	// the same cleared tab; destroyed at the end of each call.
-	session := fmt.Sprintf("prodsearch-%d", time.Now().UnixNano())
+	session := fmt.Sprintf("quarryn-%d", time.Now().UnixNano())
 	resp, err := p.cfg.Interact.Interact(ctx, wowa.InteractRequest{
 		URL:         c.URL,
 		AutoBypass:  true,

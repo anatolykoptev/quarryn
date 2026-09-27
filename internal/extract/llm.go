@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/anatolykoptev/go-kit/wowa"
-	"github.com/anatolykoptev/go-product-search/internal/money"
+	"github.com/anatolykoptev/quarryn/internal/money"
 )
 
 // productJSONSchema is the fixed JSON Schema handed to wowa

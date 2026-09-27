@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	"github.com/anatolykoptev/go-kit/wowa"
-	"github.com/anatolykoptev/go-product-search/internal/config"
-	"github.com/anatolykoptev/go-product-search/internal/rank"
-	"github.com/anatolykoptev/go-product-search/internal/search"
-	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/config"
+	"github.com/anatolykoptev/quarryn/internal/rank"
+	"github.com/anatolykoptev/quarryn/internal/search"
+	pssources "github.com/anatolykoptev/quarryn/internal/sources"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

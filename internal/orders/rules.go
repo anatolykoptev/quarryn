@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anatolykoptev/go-product-search/internal/money"
+	"github.com/anatolykoptev/quarryn/internal/money"
 )
 
 // Retailer rules: keyed on the sender's registrable domain. Each rule

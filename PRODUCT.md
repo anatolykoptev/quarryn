@@ -1,4 +1,4 @@
-# go-product-search — Product Document
+# quarryn — Product Document
 
 ## Vision
 
@@ -26,7 +26,7 @@ and each guarantee is a prompt suggestion, not code.
 
 ## What it is
 
-A self-hosted Go service on the krolik fleet, exposed over REST + MCP:
+A self-hosted Go service, exposed over REST + MCP:
 
 ```
 query → plan (deterministic criteria) → adapters (stealth scraping fleet)
@@ -47,10 +47,10 @@ Four pillars:
 - **Price watches** — per-offer and per-query watches on Postgres 18:
   15-min checker, 1% re-notify bucket, at-least-once notification ledger,
   `unverifiable` honesty, `expires_at` on every watch. Alerts via
-  dozor → Telegram. MCP: `product_watch`.
+  Alertmanager webhook → Telegram. MCP: `product_watch`.
 - **Order tracking** — order-confirmation emails → durable order graph:
-  two ingest pipes live (Gmail `Krolik/orders` IMAP poller @3min, Cloudflare
-  Email Worker `orders@krolik.run` push), per-retailer parse rules +
+  two ingest pipes (IMAP label poller, Cloudflare Email Worker push),
+  per-retailer parse rules +
   generic fallback, merge on `(retailer_domain, order_no)`, carrier
   tracking numbers + deep links, return-by computation, append-only event
   ledger. REST `POST /api/v1/orders/ingest`, MCP `product_order`.
@@ -76,7 +76,7 @@ infrastructure from prompts.
 3. **Fleet economics** — near-zero marginal cost: own stealth HTTP/browser
    infra (go-wowa), own LLM (Jeff/Jev), own Postgres. Per-query cost ≈ 0,
    unlike per-token SaaS competitors.
-4. **Fleet reuse** — dozor alerts, Caddy edge, MCP auth, pg18 — no parallel
+4. **Fleet reuse** — Alertmanager webhook alerts, Caddy edge, MCP auth, pg18 — no parallel
    stack.
 
 ## Monetization
@@ -92,7 +92,7 @@ Ranked by effort-to-revenue:
    existing Postgres; billing via fleet go-billing. Precedent: Keepa,
    Rainforest, SerpApi pricing tiers prove willingness to pay.
 3. **Niche Telegram deal bot** — watch UX already wired to Telegram via
-   dozor; cook-group/collectibles niches pay $30–100/mo for monitors. Cheap
+   the alert webhook; cook-group/collectibles niches pay $30–100/mo for monitors. Cheap
    MVP on existing infra.
 4. **B2B price intelligence** — competitor-SKU watches for sellers
    (Prisync/Competera pricing). Parked: requires coverage + SLA breadth.

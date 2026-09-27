@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anatolykoptev/go-product-search/internal/postgres"
+	"github.com/anatolykoptev/quarryn/internal/postgres"
 )
 
 // TestLivePGWatches is the env-gated smoke against the real PG18:

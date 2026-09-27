@@ -23,7 +23,7 @@ var (
 	// detail (extraction detail fetches, incl. render-tier escalations).
 	pagesFetchedTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prodsearch",
+			Namespace: "quarryn",
 			Name:      "pages_fetched_total",
 			Help:      "wowa page fetch/render calls per search request by stage.",
 		},
@@ -34,7 +34,7 @@ var (
 	// the cardinality would be unbounded; the warn log carries the domain.
 	domainThrottledTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "prodsearch",
+			Namespace: "quarryn",
 			Name:      "domain_throttled_total",
 			Help:      "Upstream 403/429/503 throttle responses observed by the fetch gate.",
 		},
@@ -176,7 +176,7 @@ type Renderer interface {
 // per-request page budget (ctx-carried PageBudget), per-domain min-interval
 // pacing and exponential backoff on 403/429/503 — after maxDomainRetries
 // throttles the domain is skipped for the remainder of the search request.
-// The stage label ("serp" | "detail") feeds prodsearch_pages_fetched_total.
+// The stage label ("serp" | "detail") feeds quarryn_pages_fetched_total.
 type FetchGate struct {
 	fetch    Fetcher
 	render   Renderer   // may be nil — Render then fails fast

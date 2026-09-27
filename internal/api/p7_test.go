@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/anatolykoptev/go-kit/wowa"
-	"github.com/anatolykoptev/go-product-search/internal/config"
-	"github.com/anatolykoptev/go-product-search/internal/match"
-	"github.com/anatolykoptev/go-product-search/internal/probe"
+	"github.com/anatolykoptev/quarryn/internal/config"
+	"github.com/anatolykoptev/quarryn/internal/match"
+	"github.com/anatolykoptev/quarryn/internal/probe"
 )
 
 var uuidV4 = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)

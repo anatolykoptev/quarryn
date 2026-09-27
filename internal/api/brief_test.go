@@ -3,11 +3,11 @@ package api
 import (
 	"testing"
 
-	"github.com/anatolykoptev/go-product-search/internal/extract"
-	"github.com/anatolykoptev/go-product-search/internal/match"
-	"github.com/anatolykoptev/go-product-search/internal/rank"
-	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
-	"github.com/anatolykoptev/go-product-search/internal/trust"
+	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/match"
+	"github.com/anatolykoptev/quarryn/internal/rank"
+	pssources "github.com/anatolykoptev/quarryn/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/trust"
 )
 
 func i64p(v int64) *int64 { return &v }
