@@ -58,6 +58,10 @@ func New(ctx context.Context, databaseURL string) (*DB, error) {
 // Close releases the pool.
 func (d *DB) Close() { d.pool.Close() }
 
+// Pool exposes the underlying pool for new stateful features
+// (watches, #53) that live under this connection's migrations.
+func (d *DB) Pool() *pgxpool.Pool { return d.pool }
+
 // AppendFeedback inserts one ADR-10 outcome row. ts arrives already
 // normalized (UTC RFC3339) from the caller's clock so tests keep control.
 func (d *DB) AppendFeedback(ctx context.Context, ts time.Time, requestID, pickedURL, verdict string) error {
