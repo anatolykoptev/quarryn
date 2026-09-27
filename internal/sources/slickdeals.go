@@ -67,7 +67,17 @@ func (a *slickdealsAdapter) Name() string { return "slickdeals" }
 
 // Spec implements Adapter.
 func (a *slickdealsAdapter) Spec() SourceSpec {
-	return SourceSpec{FetchClass: FetchClassFetch, ResolveOutbound: true}
+	return SourceSpec{
+		FetchClass:      FetchClassFetch,
+		ResolveOutbound: true,
+		// Listing URLs stay on slickdeals.net; the merchant hop resolves
+		// through the wowa browser session — userSession.
+		Manifest: Manifest{
+			ID:           a.Name(),
+			AllowedHosts: []string{"slickdeals.net", "*.slickdeals.net"},
+			UserSession:  true,
+		},
+	}
 }
 
 // Enabled implements Adapter — needs a wowa fetcher, nothing else.

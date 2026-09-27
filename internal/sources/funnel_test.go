@@ -13,16 +13,23 @@ import (
 
 // stubAdapter is a hand-rolled Adapter for funnel tests.
 type stubAdapter struct {
-	name    string
-	enabled bool
-	class   FetchClass
-	results []sources.Result
-	err     error
+	name     string
+	enabled  bool
+	class    FetchClass
+	manifest Manifest // zero → declared-unrestricted for tests
+	results  []sources.Result
+	err      error
 }
 
-func (s stubAdapter) Name() string     { return s.name }
-func (s stubAdapter) Spec() SourceSpec { return SourceSpec{FetchClass: s.class} }
-func (s stubAdapter) Enabled() bool    { return s.enabled }
+func (s stubAdapter) Name() string { return s.name }
+func (s stubAdapter) Spec() SourceSpec {
+	m := s.manifest
+	if len(m.AllowedHosts) == 0 {
+		m = Manifest{ID: s.name, AllowedHosts: []string{"*"}}
+	}
+	return SourceSpec{FetchClass: s.class, Manifest: m}
+}
+func (s stubAdapter) Enabled() bool { return s.enabled }
 func (s stubAdapter) Search(context.Context, sources.Query) ([]sources.Result, error) {
 	return s.results, s.err
 }

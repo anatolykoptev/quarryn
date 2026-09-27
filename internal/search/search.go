@@ -62,7 +62,7 @@ type Output struct {
 // credentials resolve from env inside RegistryConfigFromEnv; missing creds
 // leave adapters dark, not fatal. An absent JEFF_URL builds a degrade-mode
 // matcher — deterministic ranking only, flagged on every result.
-func New(cfg config.Config) (*Searcher, error) {
+func New(cfg config.Config, funnelOpts ...pssources.FunnelOption) (*Searcher, error) {
 	wc, err := wowa.NewClient(cfg.WowaURL)
 	if err != nil {
 		return nil, fmt.Errorf("search: wowa client: %w", err)
@@ -86,7 +86,7 @@ func New(cfg config.Config) (*Searcher, error) {
 	detailGate := pssources.NewFetchGate(wc, wc, wc, "detail", pacer)
 	registry := pssources.NewRegistry(pssources.RegistryConfigFromEnv(serpGate, nil))
 	s := &Searcher{
-		funnel:   pssources.NewFunnel(registry),
+		funnel:   pssources.NewFunnel(registry, funnelOpts...),
 		pipeline: newPipeline(cfg, detailGate, wc, registry),
 		matcher:  matcher,
 		prober:   probe.New(wc, matcher, cfg.JeffMatchMin),

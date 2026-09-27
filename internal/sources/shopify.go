@@ -80,7 +80,15 @@ func NewShopify(fetcher Fetcher, cfg ShopifyConfig) Adapter {
 func (a *shopifyAdapter) Name() string { return "shopify" }
 
 // Spec implements Adapter.
-func (a *shopifyAdapter) Spec() SourceSpec { return SourceSpec{FetchClass: FetchClassFetch} }
+func (a *shopifyAdapter) Spec() SourceSpec {
+	return SourceSpec{
+		FetchClass: FetchClassFetch,
+		// Storefronts live on arbitrary custom domains (mobilizephone.com,
+		// malbon.com) plus *.myshopify.com and the global catalog — the
+		// host set is genuinely open, so the manifest declares it.
+		Manifest: Manifest{ID: a.Name(), AllowedHosts: []string{"*"}},
+	}
+}
 
 // Enabled implements Adapter — needs a wowa fetcher and at least one shop,
 // or the UCP agent profile (which alone unlocks the global catalog).

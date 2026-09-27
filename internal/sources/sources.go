@@ -42,6 +42,9 @@ const (
 type SourceSpec struct {
 	// FetchClass declares how the adapter fetches upstream data.
 	FetchClass FetchClass
+	// Manifest is the adapter's declared contract — allowed egress hosts
+	// and the user-session flag. Enforced by the funnel at the boundary.
+	Manifest Manifest
 	// ResolveOutbound marks deal-aggregator sources whose listing URL is a
 	// thread/discussion page rather than a buyable product page (slickdeals
 	// /f/ threads). SERP-complete cards from such sources still take the

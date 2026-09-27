@@ -10,6 +10,7 @@ import (
 	"github.com/anatolykoptev/go-kit/wowa"
 	"github.com/anatolykoptev/go-product-search/internal/config"
 	"github.com/anatolykoptev/go-product-search/internal/extract"
+	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
 )
 
 // clearSourceEnv pins every adapter credential env var to empty so the test
@@ -136,7 +137,7 @@ func TestSearchAppliesExtraction(t *testing.T) {
 	clearSourceEnv(t)
 	srv, fetchedURLs := newWowaStub(t)
 
-	s, err := New(config.Config{WowaURL: srv.URL})
+	s, err := New(config.Config{WowaURL: srv.URL}, allowAllHosts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -179,3 +180,7 @@ func urlFetched(urls []string, needle string) bool {
 	}
 	return false
 }
+
+// allowAllHosts widens the manifest gate so TEST-NET fixture URLs keep
+// flowing through the real adapters — the SSRF check stays live.
+var allowAllHosts = pssources.WithManifestGate(func(pssources.Manifest, string) bool { return true })
