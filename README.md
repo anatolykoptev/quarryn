@@ -16,7 +16,10 @@ applies the deterministic prefilter then one packed jeff Ask per candidate
 |---|---|
 | `product_search` (MCP + `POST /api/tools/product_search`) | Full pipeline; returns `request_id`, ranked `results`, `sources`, `degraded` |
 | `product_match` (MCP + `POST /api/tools/product_match`) | Judge one caller-supplied product URL through the same extract+match path |
-| `product_feedback` (MCP + `POST /api/v1/feedback`) | Append the outcome record `{request_id, picked_url, verdict}` to the JSONL sink |
+| `product_feedback` (MCP + `POST /api/v1/feedback`) | Append the outcome record `{request_id, picked_url, verdict}` to Postgres (JSONL fallback) |
+| `product_watch` (MCP + `POST /api/tools/product_watch`) | Price watches: `add\|list\|cancel\|check_now` on offers or queries; alerts via dozor |
+| `product_order` (MCP + `POST /api/tools/product_order`) | Order tracking: `ingest_eml\|list\|get\|mark`; orders graph on Postgres |
+| `POST /api/v1/orders/ingest` | Raw RFC822 order-confirmation ingest (2 MiB cap) — the mail-forwarder/Cloudflare-Worker shape |
 | `product_probe` (MCP + `POST /api/tools/product_probe`) | Run the acceptance probes (below) |
 | `GET /healthz` | Open health probe (no auth) |
 | `GET /metrics` on `PROM_PORT` | Prometheus scrape |
@@ -48,7 +51,12 @@ All non-health routes require `Authorization: Bearer $INTERNAL_SERVICE_SECRET`.
 | `EXTRACT_LLM_DAILY_MAX` | `50` | Process-local wowa `/extract` cap per UTC day (resets on restart) |
 | `MAX_PAGES_PER_SEARCH` | `30` | Total wowa fetch/render calls one search may place (SERP + detail share it) |
 | `DOMAIN_MIN_INTERVAL_MS` | `2000` | Per-domain pacing floor; `0` disables pacing. Throttles back off 2s→4s→8s, max 3 retries, then the domain is skipped for that request |
-| `FEEDBACK_FILE` | `/var/lib/go-product-search/feedback.jsonl` | ADR-10 outcome log. Unwritable → log-only mode (records logged, not persisted) |
+| `DATABASE_URL` | — | Postgres 18 DSN (`postgres-gps` container): feedback sink, watches, orders |
+| `FEEDBACK_FILE` | `/var/lib/go-product-search/feedback.jsonl` | ADR-10 fallback log when PG writes fail (records logged, never dropped) |
+| `WATCH_TICK` | `15m` | Watch checker cadence |
+| `WATCH_MAX_PER_TICK` | — | Watches processed per tick |
+| `WATCH_NOTIFY_URL` | — | dozor alertmanager webhook for watch alerts |
+| `TRUST_ALLOW_DOMAINS` / `TRUST_DENY_DOMAINS` | — | Domain trust overrides |
 | `TOOL_TIMEOUT` | `90s` | Default per-tool deadline |
 | `TOOL_TIMEOUT_SEARCH` | `3m` | `product_search` deadline (scrape + judge is slow) |
 | `TOOL_TIMEOUT_MATCH` | `1m` | `product_match` deadline |
@@ -115,10 +123,28 @@ marketplaces — the injection fixture is served from the repo. Response:
 Every judged search mints a `request_id` uuid returned in the tool
 response and stamped on every `jeff_gate` log event of that call.
 `product_feedback` / `POST /api/v1/feedback` stores
-`{ts, request_id, picked_url, verdict}` as one JSONL line in
-`FEEDBACK_FILE`. Offline calibration joins the two on `request_id`:
+`{ts, request_id, picked_url, verdict}` in Postgres `feedback`
+(JSONL `FEEDBACK_FILE` fallback on PG failure). Offline calibration
+joins the two on `request_id`:
 jeff_gate carries state+verdicts+latency, feedback carries the human
 outcome.
+
+## Stateful features (Postgres 18)
+
+Two stateful pillars on the `postgres-gps` container (db
+`product_search`, goose migrations applied at start):
+
+- **Watches** (`product_watch`): re-fetch a pinned offer or re-run a
+  query on a cadence; notify on price ≤ target with a 1% re-notify
+  bucket, at-least-once ledger, `unverifiable` honesty, `expires_at`.
+- **Orders** (`product_order` + `/api/v1/orders/ingest`): raw RFC822
+  order-confirmation emails → durable order graph (two live transports:
+  Gmail `Krolik/orders` IMAP poll and the `orders@krolik.run`
+  Cloudflare Email Worker). Merge on `(retailer_domain, order_no)`,
+  carrier tracking links, return-by computation, append-only events.
+
+Docs: `docs/API.md`, `docs/OPERATIONS.md`, `ARCHITECTURE.md`,
+`SECURITY.md`, `CONTRIBUTING.md`, `PRODUCT.md`.
 
 ## Approved sources (ADR-16)
 
