@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.1](https://github.com/anatolykoptev/quarryn/compare/v1.18.0...v1.18.1) (2026-09-27)
+
+
+### Fixed
+
+* **build:** release-please-bumped version fallback for dozor worktree builds ([#102](https://github.com/anatolykoptev/quarryn/issues/102)) ([130c355](https://github.com/anatolykoptev/quarryn/commit/130c355ab54b8c977269767b84fee10ea3d2910c))
+
 ## [1.18.0](https://github.com/anatolykoptev/quarryn/compare/v1.17.1...v1.18.0) (2026-09-27)
 
 
