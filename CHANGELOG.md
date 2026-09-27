@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/anatolykoptev/go-product-search/compare/v1.11.1...v1.12.0) (2026-09-27)
+
+
+### Added
+
+* **trust:** seed trust provider ([2e60b64](https://github.com/anatolykoptev/go-product-search/commit/2e60b644a0e6bfcd16758816cfccbcebd48c25c5)), closes [#51](https://github.com/anatolykoptev/go-product-search/issues/51)
+
 ## [1.11.1](https://github.com/anatolykoptev/go-product-search/compare/v1.11.0...v1.11.1) (2026-09-26)
 
 
