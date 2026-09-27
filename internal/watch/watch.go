@@ -101,6 +101,7 @@ type Watch struct {
 	ConsecFailures   int
 
 	NotifyPending       bool
+	PendingTrigger      string // which trigger the pending alert owes (restock|price)
 	LastNotifyAttemptAt *time.Time
 	NotifiedPriceMinor  *int64
 	NotifiedAt          *time.Time
@@ -146,19 +147,24 @@ func (w Watch) effectiveTarget() int64 {
 	return tgt
 }
 
-// trigger reports which trigger an ok observation fires — "price" or
-// "restock" — given the watch's pre-check availability (the transition
-// is only visible before LastAvailability updates). Empty = nothing.
+// trigger reports which trigger an ok observation fires — "restock" or
+// "price" — given the watch's pre-check availability (the transition is
+// only visible before LastAvailability updates). Restock wins: a
+// simultaneous price hit must not dedupe-suppress the transition, and
+// the restock label is the more informative alert. Empty = nothing.
+// Restock is offer-kind only — a query watch re-picks the cheapest offer
+// per check, so cross-listing availability flips are not restocks.
 func (w Watch) trigger(prevAvail string, obs Observation) string {
 	if obs.Outcome != OutcomeOK {
 		return ""
 	}
-	if (w.NotifyOn == NotifyPrice || w.NotifyOn == NotifyAny) && w.priceHit(obs) {
-		return "price"
-	}
-	if (w.NotifyOn == NotifyRestock || w.NotifyOn == NotifyAny) &&
+	if w.Kind == KindOffer &&
+		(w.NotifyOn == NotifyRestock || w.NotifyOn == NotifyAny) &&
 		unbuyable[prevAvail] && buyable[obs.Availability] {
 		return "restock"
+	}
+	if (w.NotifyOn == NotifyPrice || w.NotifyOn == NotifyAny) && w.priceHit(obs) {
+		return "price"
 	}
 	return ""
 }

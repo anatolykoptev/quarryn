@@ -165,6 +165,12 @@ func (d deps) watchAdd(ctx context.Context, args watchArgs) watchOut {
 	if werr != "" {
 		return watchOut{Error: werr}
 	}
+	// Restock needs a stable listing: a query watch re-picks the cheapest
+	// offer each check, and cross-listing availability flips would report
+	// false restocks (Devin Review #101). DB enforces the same shape.
+	if args.Kind == string(watch.KindQuery) && w.NotifyOn != watch.NotifyPrice {
+		return watchOut{Error: "notify_on=" + w.NotifyOn + " requires kind=offer — a restock transition needs a stable listing, query watches take price triggers"}
+	}
 	switch args.Kind {
 	case string(watch.KindOffer):
 		werr = watchAddOffer(ctx, args, &w)

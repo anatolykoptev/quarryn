@@ -34,12 +34,14 @@ func (f fakeObserver) Observe(context.Context, Watch) Observation { return f.obs
 
 type fakeNotifier struct {
 	calls      int
+	kinds      []string
 	retryAfter time.Duration
 	err        error
 }
 
-func (f *fakeNotifier) Notify(context.Context, Watch, Observation, string) (time.Duration, error) {
+func (f *fakeNotifier) Notify(_ context.Context, _ Watch, _ Observation, kind string) (time.Duration, error) {
 	f.calls++
+	f.kinds = append(f.kinds, kind)
 	return f.retryAfter, f.err
 }
 

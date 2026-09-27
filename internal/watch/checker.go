@@ -140,35 +140,46 @@ func (c *Checker) check(ctx context.Context, w Watch) (Watch, Observation, error
 	if !w.shouldNotify(prevAvail, obs) {
 		return w, obs, c.Store.Record(ctx, &w, obs)
 	}
-	// Subjective gate (issue #96): a fired trigger still has to satisfy
-	// condition_text. Evaluation failures fail closed — recorded in the
-	// observation detail, unnotified, retried next check.
-	if w.ConditionText != "" && !w.NotifyPending {
-		ok, detail := c.evalCondition(ctx, w, obs)
-		if !ok {
-			obs.Detail = detail
-			return w, obs, c.Store.Record(ctx, &w, obs)
-		}
-	}
-	return w, obs, c.notify(ctx, &w, obs, now, w.trigger(prevAvail, obs))
+	return w, obs, c.gateAndNotify(ctx, &w, obs, prevAvail, now)
 }
 
-// evalCondition runs the subjective gate: true when no condition applies
-// or the evaluator accepts the observed product. A nil evaluator or a
-// missing product fails closed — a condition that cannot be checked
-// must not silently notify.
-func (c *Checker) evalCondition(ctx context.Context, w Watch, obs Observation) (bool, string) {
+// gateAndNotify runs the subjective condition gate on a firing trigger,
+// then notifies. The gate's verdict split (issue #96, review #101): a
+// deliberate rejection suppresses the alert for good — the observation
+// commits the transition, no retry owed; an evaluation ERROR is
+// retryable — the availability update rolls back so a restock
+// transition re-arms next check instead of being swallowed.
+func (c *Checker) gateAndNotify(ctx context.Context, w *Watch, obs Observation, prevAvail string, now time.Time) error {
+	if w.ConditionText != "" && !w.NotifyPending {
+		pass, retryable, detail := c.evalCondition(ctx, *w, obs)
+		if !pass {
+			if retryable {
+				w.LastAvailability = prevAvail
+			}
+			obs.Detail = detail
+			return c.Store.Record(ctx, w, obs)
+		}
+	}
+	return c.notify(ctx, w, obs, now, w.trigger(prevAvail, obs))
+}
+
+// evalCondition runs the subjective gate. Returns (pass, retryable,
+// detail): retryable marks "couldn't evaluate" (nil evaluator, missing
+// product, transport error) — the caller must not commit the restock
+// transition for a check that never reached a verdict. A clean
+// rejection is permanent.
+func (c *Checker) evalCondition(ctx context.Context, w Watch, obs Observation) (bool, bool, string) {
 	if c.Evaluator == nil || obs.Product == nil {
-		return false, "condition unevaluated: match service unavailable"
+		return false, true, "condition unevaluated: match service unavailable"
 	}
 	ok, err := c.Evaluator.EvaluateCondition(ctx, w.ConditionText, *obs.Product)
 	if err != nil {
-		return false, "condition unevaluated: " + err.Error()
+		return false, true, "condition unevaluated: " + err.Error()
 	}
 	if !ok {
-		return false, "condition not met: " + w.ConditionText
+		return false, false, "condition not met: " + w.ConditionText
 	}
-	return true, ""
+	return true, false, ""
 }
 
 // notify is the boundary where a check ends — the only outbound effect.
@@ -177,6 +188,13 @@ func (c *Checker) evalCondition(ctx context.Context, w Watch, obs Observation) (
 // fired ("price"|"restock"); pending retries recompute it from the fresh
 // observation and may pass "".
 func (c *Checker) notify(ctx context.Context, w *Watch, obs Observation, now time.Time, kind string) error {
+	// A fresh fire captures its trigger; a retry of a pending alert reuses
+	// the captured one — recomputing against the settled observation
+	// would label a restock retry "unknown" (Devin Review #101).
+	if w.PendingTrigger == "" {
+		w.PendingTrigger = kind
+	}
+	kind = w.PendingTrigger
 	w.NotifyPending = true
 	w.LastNotifyAttemptAt = &now
 	// Persist the pending flag BEFORE sending — a crash between send and
@@ -194,6 +212,7 @@ func (c *Checker) notify(ctx context.Context, w *Watch, obs Observation, now tim
 		})
 	}
 	w.NotifyPending = false
+	w.PendingTrigger = ""
 	w.NotifiedPriceMinor = obs.PriceMinor
 	w.NotifiedAt = &now
 	w.NotifyCount++

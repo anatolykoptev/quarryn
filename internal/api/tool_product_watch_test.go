@@ -142,6 +142,27 @@ func TestWatchAddTriggerShapes(t *testing.T) {
 	}
 }
 
+// Restock on a query watch is rejected: the cheapest offer changes
+// between checks, and a cross-listing availability flip would report a
+// false restock (Devin Review #101). Query watches take price triggers.
+func TestWatchAddQueryRejectsRestock(t *testing.T) {
+	d := watchDeps()
+	for _, mode := range []string{"restock", "any"} {
+		a := watchArgs{Action: "add", Kind: "query", Query: "jbl speaker",
+			Currency: "USD", NotifyOn: mode, TargetPrice: 30}
+		out := d.watchAdd(context.Background(), a)
+		if out.OK {
+			t.Errorf("query+notify_on=%s accepted — restock needs a stable listing", mode)
+		}
+	}
+	// Price-mode query watch still fine.
+	a := watchArgs{Action: "add", Kind: "query", Query: "jbl speaker",
+		Currency: "USD", NotifyOn: "price", TargetPrice: 30}
+	if out := d.watchAdd(context.Background(), a); !out.OK {
+		t.Fatalf("price-mode query add rejected: %s", out.Error)
+	}
+}
+
 // native_id is the offer-watch honesty flag: url| fallbacks must not pose
 // as listing-pinned.
 func TestWatchAddNativeID(t *testing.T) {

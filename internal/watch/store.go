@@ -57,7 +57,7 @@ func (s *Store) List(ctx context.Context, includeInactive bool) ([]Watch, error)
 		last_price_minor, last_availability, consec_failures,
 		notify_pending, last_notify_attempt_at, notified_price_minor,
 		notified_at, notify_count, notify_on, target_pct,
-		baseline_price_minor, condition_text
+		baseline_price_minor, condition_text, pending_trigger
 		FROM watches`
 	if !includeInactive {
 		q += ` WHERE status = 'active'`
@@ -89,7 +89,7 @@ func (s *Store) Get(ctx context.Context, id int64) (Watch, error) {
 			last_price_minor, last_availability, consec_failures,
 			notify_pending, last_notify_attempt_at, notified_price_minor,
 			notified_at, notify_count, notify_on, target_pct,
-			baseline_price_minor, condition_text
+			baseline_price_minor, condition_text, pending_trigger
 		FROM watches WHERE id=$1`, id)
 	return scanWatch(row)
 }
@@ -111,7 +111,7 @@ func (s *Store) Due(ctx context.Context, limit int, now time.Time) ([]Watch, err
 			last_price_minor, last_availability, consec_failures,
 			notify_pending, last_notify_attempt_at, notified_price_minor,
 			notified_at, notify_count, notify_on, target_pct,
-			baseline_price_minor, condition_text
+			baseline_price_minor, condition_text, pending_trigger
 		FROM watches
 		WHERE status='active' AND expires_at > $1 AND next_check_after <= $1
 		ORDER BY next_check_after
@@ -144,7 +144,7 @@ func scanWatch(r rowScanner) (Watch, error) {
 		&w.LastAvailability, &w.ConsecFailures, &w.NotifyPending,
 		&w.LastNotifyAttemptAt, &w.NotifiedPriceMinor, &w.NotifiedAt,
 		&w.NotifyCount, &w.NotifyOn, &w.TargetPct, &w.BaselineMinor,
-		&w.ConditionText)
+		&w.ConditionText, &w.PendingTrigger)
 	if err != nil {
 		return w, err
 	}
@@ -184,12 +184,13 @@ func (s *Store) Record(ctx context.Context, w *Watch, obs Observation) error {
 			consec_failures=$7, notify_pending=$8,
 			last_notify_attempt_at=$9, notified_price_minor=$10,
 			notified_at=$11, notify_count=$12,
-			baseline_price_minor=$13
+			baseline_price_minor=$13,
+			pending_trigger=$14
 		WHERE id=$1`,
 		w.ID, w.Status, w.LastCheckedAt, w.NextCheckAfter,
 		w.LastPriceMinor, w.LastAvailability, w.ConsecFailures,
 		w.NotifyPending, w.LastNotifyAttemptAt, w.NotifiedPriceMinor,
-		w.NotifiedAt, w.NotifyCount, w.BaselineMinor)
+		w.NotifiedAt, w.NotifyCount, w.BaselineMinor, w.PendingTrigger)
 	if err != nil {
 		return fmt.Errorf("update watch: %w", err)
 	}

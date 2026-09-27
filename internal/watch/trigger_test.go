@@ -76,7 +76,8 @@ func TestRestockBoundaries(t *testing.T) {
 }
 
 // At-least-once for restock: a failed send retries via notify_pending —
-// the settled (non-transition) observation must still deliver.
+// the settled (non-transition) observation must still deliver, and the
+// retry keeps the original "restock" label (pending_trigger, PR #101).
 func TestRestockPendingRetry(t *testing.T) {
 	st := &fakeStore{}
 	nf := &fakeNotifier{err: errors.New("down")}
@@ -92,6 +93,9 @@ func TestRestockPendingRetry(t *testing.T) {
 	if !got.NotifyPending {
 		t.Fatal("failed restock notify must leave pending set")
 	}
+	if got.PendingTrigger != "restock" {
+		t.Fatalf("pending_trigger = %q, want restock", got.PendingTrigger)
+	}
 
 	nf.err = nil
 	// Next check: still in_stock — no fresh transition. Pending overrides.
@@ -100,6 +104,114 @@ func TestRestockPendingRetry(t *testing.T) {
 	}
 	if nf.calls != 2 {
 		t.Fatalf("notify calls = %d, want 2 (pending retry delivered)", nf.calls)
+	}
+	if nf.kinds[0] != "restock" || nf.kinds[1] != "restock" {
+		t.Fatalf("retry label lost: kinds = %v, want [restock restock]", nf.kinds)
+	}
+	fin := st.recorded[len(st.recorded)-1]
+	if fin.PendingTrigger != "" {
+		t.Fatal("pending_trigger must clear on ack")
+	}
+}
+
+// An evaluator ERROR on a restock transition must not consume the
+// transition — availability rolls back so the next check re-arms and
+// retries the gate (Devin Review #101: failed condition lost restocks).
+func TestConditionErrorReArmsRestock(t *testing.T) {
+	st := &fakeStore{}
+	nf := &fakeNotifier{}
+	c := &Checker{Store: st, Notify: nf, Evaluator: fakeEvaluator{err: errors.New("jeff down")}}
+	c.Observer = fakeObserver{Observation{
+		Outcome: OutcomeOK, PriceMinor: ptr(9_000), Currency: "USD",
+		Availability: "in_stock", Product: &extract.Product{Name: "W"},
+	}}
+
+	w := restockWatch()
+	w.NotifyOn = NotifyAny
+	w.ConditionText = "sold by brand"
+	w.LastAvailability = "out_of_stock"
+	target := int64(9_500)
+	w.TargetPriceMinor = &target // price hit also present — still gated
+
+	if _, _, err := c.CheckOnce(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if nf.calls != 0 {
+		t.Fatal("eval error must not notify")
+	}
+	got := st.recorded[len(st.recorded)-1]
+	if got.LastAvailability != "out_of_stock" {
+		t.Fatalf("LastAvailability = %q — eval error must roll back the transition", got.LastAvailability)
+	}
+
+	// Evaluator recovers; still in_stock — re-armed transition retries.
+	c.Evaluator = fakeEvaluator{pass: true}
+	if _, _, err := c.CheckOnce(context.Background(), got); err != nil {
+		t.Fatal(err)
+	}
+	if nf.calls != 1 {
+		t.Fatalf("notify calls = %d, want 1 after evaluator recovery", nf.calls)
+	}
+	if nf.kinds[0] != "restock" {
+		t.Fatalf("kind = %q, want restock (transition beats price)", nf.kinds[0])
+	}
+}
+
+// Combined "any" watches: a restock arriving while a price hit sits in
+// the dedupe bucket must still alert — the transition is the fresh event.
+func TestAnyModeRestockBeatsPriceDedupe(t *testing.T) {
+	st := &fakeStore{}
+	nf := &fakeNotifier{}
+	c := &Checker{Store: st, Notify: nf}
+	c.Observer = fakeObserver{availObs("in_stock", 9_000)}
+
+	pct99 := int64(9_000)
+	w := baseWatch()
+	w.NotifyOn = NotifyAny
+	w.NotifiedPriceMinor = &pct99 // identical price — inside the 1% bucket
+	w.LastAvailability = "out_of_stock"
+
+	if _, _, err := c.CheckOnce(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if nf.calls != 1 {
+		t.Fatal("restock suppressed by price dedupe — transition must win")
+	}
+	if nf.kinds[0] != "restock" {
+		t.Fatalf("kind = %q, want restock", nf.kinds[0])
+	}
+}
+
+// A clean rejection suppresses for good: the transition commits and no
+// retry is owed (unlike an evaluation error).
+func TestConditionRejectSuppressesRestock(t *testing.T) {
+	st := &fakeStore{}
+	nf := &fakeNotifier{}
+	c := &Checker{Store: st, Notify: nf, Evaluator: fakeEvaluator{pass: false}}
+	c.Observer = fakeObserver{Observation{
+		Outcome: OutcomeOK, Currency: "USD",
+		Availability: "in_stock", Product: &extract.Product{Name: "W"},
+	}}
+
+	w := restockWatch()
+	w.ConditionText = "brand store"
+	w.LastAvailability = "out_of_stock"
+	if _, _, err := c.CheckOnce(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if nf.calls != 0 {
+		t.Fatal("rejected condition notified")
+	}
+	got := st.recorded[len(st.recorded)-1]
+	if got.LastAvailability != "in_stock" {
+		t.Fatal("rejected eval must commit the transition (no retry owed)")
+	}
+	// Second check, still in_stock: nothing re-fires.
+	if _, _, err := c.CheckOnce(context.Background(), got); err != nil {
+		t.Fatal(err)
+	}
+	if nf.calls != 0 {
+		t.Fatal("rejection must be permanent — no silent re-alert")
 	}
 }
 
