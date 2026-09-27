@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/anatolykoptev/go-product-search/compare/v1.16.1...v1.17.0) (2026-09-27)
+
+
+### Added
+
+* order tracking via confirmation-email parsing ([#57](https://github.com/anatolykoptev/go-product-search/issues/57)) ([a76d85e](https://github.com/anatolykoptev/go-product-search/commit/a76d85ed39c3144406f47046861ec20a38c530eb))
+
 ## [1.16.1](https://github.com/anatolykoptev/go-product-search/compare/v1.16.0...v1.16.1) (2026-09-27)
 
 
