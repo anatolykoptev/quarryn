@@ -11,7 +11,7 @@ import (
 
 const productSearchDesc = "Search marketplace adapters for products matching a query and rank them " +
 	"against your criteria. Criteria mix deterministic constraints " +
-	"(price_max:500, price_min:100, currency:usd, brand:sony, not_keyword:refurbished, availability:in_stock) " +
+	"(price_max:500, price_min:100, currency:usd, brand:sony, not_keyword:refurbished, availability:in_stock, condition:used) " +
 	"with free-text subjective criteria judged per product (\"good battery life\", \"durable build\"). " +
 	"Returns ranked products with fused scores, per-criterion verdicts and deal signals " +
 	"(discount_pct, thumbs, rating). degraded:true means the judge service was unreachable and " +

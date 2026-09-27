@@ -28,6 +28,7 @@ const (
 	ExclKeywordMissing       ReasonCode = "keyword_missing"
 	ExclKeywordExcluded      ReasonCode = "keyword_excluded"
 	ExclAvailabilityMismatch ReasonCode = "availability_mismatch"
+	ExclConditionMismatch    ReasonCode = "condition_mismatch"
 	ExclExtractionFailed     ReasonCode = "extraction_failed"
 	ExclDeferredRender       ReasonCode = "deferred_render"
 )
@@ -49,7 +50,20 @@ func checkCandidate(p extract.Product, c Constraints) (ReasonCode, string) {
 	if r, d := checkTerms(p, c); r != "" {
 		return r, d
 	}
-	return checkAvailability(p, c)
+	if r, d := checkAvailability(p, c); r != "" {
+		return r, d
+	}
+	return checkCondition(p, c)
+}
+
+// checkCondition requires an exact canonical-enum match, same rule as
+// availability: a stated condition constraint is not waived by missing
+// product data — an unknown condition fails it.
+func checkCondition(p extract.Product, c Constraints) (ReasonCode, string) {
+	if c.Condition != "" && p.Condition != c.Condition {
+		return ExclConditionMismatch, fmt.Sprintf("condition %q != required %q", p.Condition, c.Condition)
+	}
+	return "", ""
 }
 
 // checkPrice applies the bounds. A product without a price cannot prove it

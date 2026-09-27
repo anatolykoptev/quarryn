@@ -42,15 +42,17 @@ const noulInstructionTemplate = "Does this product satisfy: %s?"
 //
 //	price_max:N      price_min:N     currency:ISO
 //	brand:X          not_brand:X     keyword:X        not_keyword:X
-//	availability:ENUM
+//	availability:ENUM  condition:ENUM
 //
-// ENUM is the canonical availability vocabulary emitted by extract:
-// in_stock | out_of_stock | pre_order | backorder | limited | discontinued.
+// availability ENUM is extract's canonical vocabulary: in_stock |
+// out_of_stock | pre_order | backorder | limited | discontinued.
+// condition ENUM is the canonical condition set: new | like_new |
+// refurbished | used | for_parts | damaged.
 var deterministicKeys = map[string]struct{}{
 	"price_max": {}, "price_min": {}, "currency": {},
 	"brand": {}, "not_brand": {},
 	"keyword": {}, "not_keyword": {},
-	"availability": {},
+	"availability": {}, "condition": {},
 }
 
 // availabilities mirrors extract's canonical availability enum — the only
@@ -73,6 +75,7 @@ type Constraints struct {
 	KeywordsMust    []string `json:"keywords_must,omitempty"`
 	KeywordsMustNot []string `json:"keywords_must_not,omitempty"`
 	Availability    string   `json:"availability,omitempty"` // canonical enum
+	Condition       string   `json:"condition,omitempty"`    // canonical enum
 }
 
 // empty reports whether no deterministic constraint was parsed.
@@ -80,7 +83,7 @@ func (c Constraints) empty() bool {
 	return c.PriceMin == nil && c.PriceMax == nil && c.Currency == "" &&
 		len(c.BrandsInclude) == 0 && len(c.BrandsExclude) == 0 &&
 		len(c.KeywordsMust) == 0 && len(c.KeywordsMustNot) == 0 &&
-		c.Availability == ""
+		c.Availability == "" && c.Condition == ""
 }
 
 // Question is one subjective criterion packed for jeff. ID ("c0", "c1", …)
@@ -182,6 +185,8 @@ func (c *Constraints) add(key, val string) error {
 		return c.addTerm(key, val)
 	case "availability":
 		return c.addAvailability(val)
+	case "condition":
+		return c.addCondition(val)
 	}
 	return nil
 }
@@ -233,6 +238,22 @@ func (c *Constraints) addAvailability(val string) error {
 		return fmt.Errorf("%w: availability %q", ErrUnknownConstraint, val)
 	}
 	c.Availability = lv
+	return nil
+}
+
+// conditions mirrors extract's canonical condition enum (same
+// deliberate vocabulary copy as availabilities above).
+var conditions = map[string]struct{}{
+	"new": {}, "like_new": {}, "refurbished": {},
+	"used": {}, "for_parts": {}, "damaged": {},
+}
+
+func (c *Constraints) addCondition(val string) error {
+	lv := strings.ToLower(val)
+	if _, ok := conditions[lv]; !ok {
+		return fmt.Errorf("%w: condition %q", ErrUnknownConstraint, val)
+	}
+	c.Condition = lv
 	return nil
 }
 
