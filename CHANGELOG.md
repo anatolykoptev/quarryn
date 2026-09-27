@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/anatolykoptev/go-product-search/compare/v1.15.0...v1.16.0) (2026-09-27)
+
+
+### Added
+
+* price watches on PG18 — offer/query watches, at-least-once notify ledger ([#53](https://github.com/anatolykoptev/go-product-search/issues/53)) ([6db6e25](https://github.com/anatolykoptev/go-product-search/commit/6db6e25c9a2a36d7ec9221348efa94ba6990de29))
+
 ## [1.15.0](https://github.com/anatolykoptev/go-product-search/compare/v1.14.0...v1.15.0) (2026-09-27)
 
 
