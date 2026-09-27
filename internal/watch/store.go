@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,32 +39,43 @@ func (s *Store) Create(ctx context.Context, w *Watch) error {
 		INSERT INTO watches (kind, offer_id, native_id, url, label, query,
 			criteria, target_price_minor, currency, interval_minutes,
 			expires_at, next_check_after, notify_on, target_pct,
-			condition_text)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(),$12,$13,$14)
+			condition_text, owner)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(),$12,$13,$14,$15)
 		RETURNING id, created_at`,
 		w.Kind, w.OfferID, w.NativeID, w.URL, w.Label, w.Query,
 		crit, w.TargetPriceMinor, w.Currency,
 		int(w.Interval.Minutes()), w.ExpiresAt,
-		w.NotifyOn, w.TargetPct, w.ConditionText).
+		w.NotifyOn, w.TargetPct, w.ConditionText, w.Owner).
 		Scan(&w.ID, &w.CreatedAt)
 	return err
 }
 
 // List returns watches; inactive ones only when includeInactive.
-func (s *Store) List(ctx context.Context, includeInactive bool) ([]Watch, error) {
+// A non-empty owner scopes to that tenant; "" lists everything (fleet
+// callers stay unscoped — the bot is the caller that filters).
+func (s *Store) List(ctx context.Context, owner string, includeInactive bool) ([]Watch, error) {
 	q := `SELECT id, created_at, expires_at, kind, offer_id, native_id,
 		url, label, query, criteria, target_price_minor, currency,
 		interval_minutes, status, last_checked_at, next_check_after,
 		last_price_minor, last_availability, consec_failures,
 		notify_pending, last_notify_attempt_at, notified_price_minor,
 		notified_at, notify_count, notify_on, target_pct,
-		baseline_price_minor, condition_text, pending_trigger
+		baseline_price_minor, condition_text, pending_trigger, owner
 		FROM watches`
+	var args []any
+	var conds []string
 	if !includeInactive {
-		q += ` WHERE status = 'active'`
+		conds = append(conds, `status = 'active'`)
+	}
+	if owner != "" {
+		args = append(args, owner)
+		conds = append(conds, fmt.Sprintf("owner = $%d", len(args)))
+	}
+	if len(conds) > 0 {
+		q += ` WHERE ` + strings.Join(conds, ` AND `)
 	}
 	q += ` ORDER BY id`
-	rows, err := s.pool.Query(ctx, q)
+	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +92,9 @@ func (s *Store) List(ctx context.Context, includeInactive bool) ([]Watch, error)
 }
 
 // Get fetches one watch by id — check_now and revalidation read single
-// rows, not the whole fleet.
-func (s *Store) Get(ctx context.Context, id int64) (Watch, error) {
+// rows, not the whole fleet. A non-empty owner scopes: a foreign-owner
+// row reports ErrNotFound (no existence leak).
+func (s *Store) Get(ctx context.Context, owner string, id int64) (Watch, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, created_at, expires_at, kind, offer_id, native_id,
 			url, label, query, criteria, target_price_minor, currency,
@@ -89,16 +102,17 @@ func (s *Store) Get(ctx context.Context, id int64) (Watch, error) {
 			last_price_minor, last_availability, consec_failures,
 			notify_pending, last_notify_attempt_at, notified_price_minor,
 			notified_at, notify_count, notify_on, target_pct,
-			baseline_price_minor, condition_text, pending_trigger
-		FROM watches WHERE id=$1`, id)
+			baseline_price_minor, condition_text, pending_trigger, owner
+		FROM watches WHERE id=$1 AND ($2='' OR owner=$2)`, id, owner)
 	return scanWatch(row)
 }
 
 // Cancel flips a watch to cancelled from any non-terminal status —
 // an unverifiable/expired watch is cancellable too; only cancelled is final.
-func (s *Store) Cancel(ctx context.Context, id int64) (bool, error) {
+func (s *Store) Cancel(ctx context.Context, owner string, id int64) (bool, error) {
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE watches SET status='cancelled' WHERE id=$1 AND status<>'cancelled'`, id)
+		`UPDATE watches SET status='cancelled' WHERE id=$1 AND ($2='' OR owner=$2)
+		 AND status<>'cancelled'`, id, owner)
 	return tag.RowsAffected() > 0, err
 }
 
@@ -111,7 +125,7 @@ func (s *Store) Due(ctx context.Context, limit int, now time.Time) ([]Watch, err
 			last_price_minor, last_availability, consec_failures,
 			notify_pending, last_notify_attempt_at, notified_price_minor,
 			notified_at, notify_count, notify_on, target_pct,
-			baseline_price_minor, condition_text, pending_trigger
+			baseline_price_minor, condition_text, pending_trigger, owner
 		FROM watches
 		WHERE status='active' AND expires_at > $1 AND next_check_after <= $1
 		ORDER BY next_check_after
@@ -131,6 +145,15 @@ func (s *Store) Due(ctx context.Context, limit int, now time.Time) ([]Watch, err
 	return out, rows.Err()
 }
 
+// CountByOwner is the per-tenant watch cap input (issue #100 arc —
+// public bot users can't mint unbounded watches).
+func (s *Store) CountByOwner(ctx context.Context, owner string) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM watches WHERE owner=$1 AND status='active'`, owner).Scan(&n)
+	return n, err
+}
+
 type rowScanner interface{ Scan(...any) error }
 
 func scanWatch(r rowScanner) (Watch, error) {
@@ -144,7 +167,7 @@ func scanWatch(r rowScanner) (Watch, error) {
 		&w.LastAvailability, &w.ConsecFailures, &w.NotifyPending,
 		&w.LastNotifyAttemptAt, &w.NotifiedPriceMinor, &w.NotifiedAt,
 		&w.NotifyCount, &w.NotifyOn, &w.TargetPct, &w.BaselineMinor,
-		&w.ConditionText, &w.PendingTrigger)
+		&w.ConditionText, &w.PendingTrigger, &w.Owner)
 	if err != nil {
 		return w, err
 	}

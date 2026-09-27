@@ -23,9 +23,9 @@ import (
 // orderStorer is the api seam — *orders.Store in prod, fake in tests.
 type orderStorer interface {
 	Upsert(ctx context.Context, o *orders.Order) (bool, error)
-	List(ctx context.Context, activeOnly bool) ([]orders.Order, error)
-	Get(ctx context.Context, id int64) (orders.Order, []orders.Event, error)
-	Mark(ctx context.Context, id int64, status string) (bool, error)
+	List(ctx context.Context, owner string, activeOnly bool) ([]orders.Order, error)
+	Get(ctx context.Context, owner string, id int64) (orders.Order, []orders.Event, error)
+	Mark(ctx context.Context, owner string, id int64, status string) (bool, error)
 }
 
 type orderArgs struct {
@@ -35,6 +35,9 @@ type orderArgs struct {
 	EMLBase64  bool   `json:"eml_base64,omitempty" jsonschema:"decode eml from base64"`
 	ActiveOnly bool   `json:"active_only,omitempty" jsonschema:"list: hide delivered/returned/cancelled"`
 	Status     string `json:"status,omitempty" jsonschema:"mark: delivered|returned|cancelled"`
+	// Owner scopes the order to a tenant ("tg:<chat_id>" for bot users);
+	// empty = fleet mailbox ingest / unscoped fleet reads.
+	Owner string `json:"owner,omitempty" jsonschema:"tenant owner, e.g. tg:<chat_id>; scopes ingest_eml/list/get/mark"`
 }
 
 type orderOut struct {
@@ -62,6 +65,7 @@ type orderEntry struct {
 	Carrier    string  `json:"carrier,omitempty"`
 	TrackURL   string  `json:"track_url,omitempty"`
 	Subject    string  `json:"subject,omitempty"`
+	Owner      string  `json:"owner,omitempty"`
 }
 
 type orderEvent struct {
@@ -83,6 +87,7 @@ func toOrderEntry(o orders.Order) orderEntry {
 		Carrier:    o.Carrier,
 		TrackURL:   o.TrackURL,
 		Subject:    o.Subject,
+		Owner:      o.Owner,
 	}
 	if o.PlacedAt != nil {
 		s := o.PlacedAt.UTC().Format(time.RFC3339)
@@ -128,7 +133,7 @@ func (d deps) orderIngest(ctx context.Context, args orderArgs) (*mcp.CallToolRes
 	if len(raw) < 20 {
 		return errResult("eml too short / empty"), nil
 	}
-	o, created, err := orders.Ingest(ctx, d.orderStore, raw)
+	o, created, err := orders.Ingest(ctx, d.orderStore, raw, args.Owner)
 	if err != nil {
 		return errResult("ingest: " + err.Error()), nil
 	}
@@ -138,7 +143,7 @@ func (d deps) orderIngest(ctx context.Context, args orderArgs) (*mcp.CallToolRes
 }
 
 func (d deps) orderList(ctx context.Context, args orderArgs) (*mcp.CallToolResult, error) {
-	os_, err := d.orderStore.List(ctx, args.ActiveOnly)
+	os_, err := d.orderStore.List(ctx, args.Owner, args.ActiveOnly)
 	if err != nil {
 		return errResult(err.Error()), nil
 	}
@@ -153,7 +158,7 @@ func (d deps) orderGet(ctx context.Context, args orderArgs) (*mcp.CallToolResult
 	if args.OrderID == 0 {
 		return errResult("order_id required"), nil
 	}
-	o, evs, err := d.orderStore.Get(ctx, args.OrderID)
+	o, evs, err := d.orderStore.Get(ctx, args.Owner, args.OrderID)
 	if err != nil {
 		return errResult(err.Error()), nil
 	}
@@ -177,7 +182,7 @@ func (d deps) orderMark(ctx context.Context, args orderArgs) (*mcp.CallToolResul
 	default:
 		return errResult("status must be delivered|returned|cancelled|confirmed"), nil
 	}
-	ok, err := d.orderStore.Mark(ctx, args.OrderID, args.Status)
+	ok, err := d.orderStore.Mark(ctx, args.Owner, args.OrderID, args.Status)
 	if err != nil {
 		return errResult(err.Error()), nil
 	}
@@ -202,7 +207,7 @@ func OrdersIngestHandler(store orderStorer) http.HandlerFunc {
 			http.Error(w, `{"error":"empty or unreadable eml body"}`, http.StatusBadRequest)
 			return
 		}
-		o, created, err := orders.Ingest(r.Context(), store, raw)
+		o, created, err := orders.Ingest(r.Context(), store, raw, "")
 		w.Header().Set("content-type", "application/json")
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)

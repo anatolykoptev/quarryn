@@ -46,6 +46,9 @@ type Order struct {
 	TrackingNo     string
 	Carrier        string // ups|usps|fedex|dhl|""
 	TrackURL       string // public carrier deep link
+	// Owner is the tenant that ingested the order — "tg:<chat_id>" for
+	// bot users, "" for the fleet mailbox path.
+	Owner string
 }
 
 // Event is one row of order_events — the append-only history.

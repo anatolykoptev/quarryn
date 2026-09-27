@@ -11,8 +11,10 @@ import (
 // fakeWatchStore satisfies watchStorer for validation tests — pg itself
 // is covered by the env-gated live test in internal/postgres.
 type fakeWatchStore struct {
-	created   *watch.Watch
-	cancelled int64
+	created    *watch.Watch
+	cancelled  int64
+	ownerSeen  []string // every owner arg a scoped call carried
+	ownerCount int
 }
 
 func (f *fakeWatchStore) Create(_ context.Context, w *watch.Watch) error {
@@ -21,21 +23,84 @@ func (f *fakeWatchStore) Create(_ context.Context, w *watch.Watch) error {
 	return nil
 }
 
-func (f *fakeWatchStore) List(context.Context, bool) ([]watch.Watch, error) {
+func (f *fakeWatchStore) List(_ context.Context, owner string, _ bool) ([]watch.Watch, error) {
+	f.ownerSeen = append(f.ownerSeen, owner)
 	return nil, nil
 }
 
-func (f *fakeWatchStore) Get(context.Context, int64) (watch.Watch, error) {
+func (f *fakeWatchStore) Get(_ context.Context, owner string, _ int64) (watch.Watch, error) {
+	f.ownerSeen = append(f.ownerSeen, owner)
 	return watch.Watch{}, nil
 }
 
-func (f *fakeWatchStore) Cancel(_ context.Context, id int64) (bool, error) {
+func (f *fakeWatchStore) Cancel(_ context.Context, owner string, id int64) (bool, error) {
+	f.ownerSeen = append(f.ownerSeen, owner)
 	f.cancelled = id
 	return true, nil
 }
 
+func (f *fakeWatchStore) CountByOwner(_ context.Context, owner string) (int, error) {
+	f.ownerSeen = append(f.ownerSeen, owner)
+	return f.ownerCount, nil
+}
+
 func (f *fakeWatchStore) History(context.Context, int64, int) ([]watch.Observation, error) {
 	return nil, nil
+}
+
+// Owner scoping (issue #100 arc): every action must carry the caller's
+// owner into the store — a missed arg silently leaks another tenant's
+// watches to a bot user, and a missing stamp silently orphans the row.
+func TestWatchOwnerScoping(t *testing.T) {
+	d := watchDeps()
+	st := d.watchStore.(*fakeWatchStore)
+	ctx := context.Background()
+
+	a := watchArgs{Action: "add", Kind: "offer", URL: "http://192.0.2.10/p",
+		TargetPrice: 100, Currency: "USD", Owner: "tg:42"}
+	if out := d.watchAdd(ctx, a); !out.OK {
+		t.Fatalf("owned add rejected: %s", out.Error)
+	}
+	if st.created.Owner != "tg:42" {
+		t.Fatalf("created owner = %q", st.created.Owner)
+	}
+
+	d.watchList(ctx, watchArgs{Action: "list", Owner: "tg:42"})
+	d.watchGet(ctx, watchArgs{Action: "get", WatchID: 7, Owner: "tg:42"})
+	d.watchCancel(ctx, watchArgs{Action: "cancel", WatchID: 7, Owner: "tg:42"})
+	for i, o := range st.ownerSeen {
+		if o != "tg:42" {
+			t.Errorf("call %d carried owner %q, want tg:42", i, o)
+		}
+	}
+	if len(st.ownerSeen) < 3 { // list + get + cancel (count needs max>0)
+		t.Fatalf("owner path seen %d calls, want >=3", len(st.ownerSeen))
+	}
+}
+
+// The per-owner cap is the public-bot abuse bound — a tenant past the
+// cap must be refused before Create.
+func TestWatchOwnerCap(t *testing.T) {
+	d := watchDeps()
+	d.watchOwnerMax = 2
+	st := d.watchStore.(*fakeWatchStore)
+	st.ownerCount = 2
+
+	a := watchArgs{Action: "add", Kind: "offer", URL: "http://192.0.2.10/p",
+		TargetPrice: 100, Currency: "USD", Owner: "tg:42"}
+	out := d.watchAdd(context.Background(), a)
+	if out.OK {
+		t.Fatal("add past owner cap accepted")
+	}
+	if !strings.Contains(out.Error, "cap") {
+		t.Fatalf("cap error %q lacks 'cap'", out.Error)
+	}
+
+	// Fleet (ownerless) adds are uncapped.
+	a.Owner = ""
+	if out := d.watchAdd(context.Background(), a); !out.OK {
+		t.Fatalf("ownerless add rejected: %s", out.Error)
+	}
 }
 
 func watchDeps() deps {

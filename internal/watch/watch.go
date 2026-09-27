@@ -106,6 +106,11 @@ type Watch struct {
 	NotifiedPriceMinor  *int64
 	NotifiedAt          *time.Time
 	NotifyCount         int
+
+	// Owner is the tenant that created the watch — "tg:<chat_id>" for
+	// bot-created rows, "" for fleet. Scoped API reads filter on it; the
+	// checker processes all owners (Due is global).
+	Owner string
 }
 
 // Observation is one check's outcome — also the price-history row.

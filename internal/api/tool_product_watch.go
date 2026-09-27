@@ -25,9 +25,10 @@ import (
 // watchStorer is the api seam — *watch.Store in prod, a fake in tests.
 type watchStorer interface {
 	Create(ctx context.Context, w *watch.Watch) error
-	List(ctx context.Context, includeInactive bool) ([]watch.Watch, error)
-	Get(ctx context.Context, id int64) (watch.Watch, error)
-	Cancel(ctx context.Context, id int64) (bool, error)
+	List(ctx context.Context, owner string, includeInactive bool) ([]watch.Watch, error)
+	Get(ctx context.Context, owner string, id int64) (watch.Watch, error)
+	Cancel(ctx context.Context, owner string, id int64) (bool, error)
+	CountByOwner(ctx context.Context, owner string) (int, error)
 	History(ctx context.Context, id int64, limit int) ([]watch.Observation, error)
 }
 type watchArgs struct {
@@ -51,6 +52,9 @@ type watchArgs struct {
 	IncludeInactive bool    `json:"include_inactive,omitempty" jsonschema:"list: include cancelled/expired"`
 	History         bool    `json:"history,omitempty" jsonschema:"list/get: attach recorded price+availability history"`
 	HistoryLimit    int     `json:"history_limit,omitempty" jsonschema:"history rows per watch; default 100, max 500"`
+	// Owner scopes the row to a tenant ("tg:<chat_id>" for bot users).
+	// Empty = unscoped fleet caller. The bot always stamps its user.
+	Owner string `json:"owner,omitempty" jsonschema:"tenant owner, e.g. tg:<chat_id>; scopes add/list/get/cancel/check_now"`
 }
 
 type watchOut struct {
@@ -85,6 +89,7 @@ type watchEntry struct {
 	LastAvailability string         `json:"last_availability,omitempty"`
 	NotifyCount      int            `json:"notify_count"`
 	NotifyPending    bool           `json:"notify_pending,omitempty"`
+	Owner            string         `json:"owner,omitempty"`
 	History          []historyEntry `json:"history,omitempty"`
 }
 
@@ -132,6 +137,7 @@ func toWatchEntry(w watch.Watch) watchEntry {
 		LastAvailability: w.LastAvailability,
 		NotifyCount:      w.NotifyCount,
 		NotifyPending:    w.NotifyPending,
+		Owner:            w.Owner,
 	}
 	if w.LastCheckedAt != nil {
 		s := w.LastCheckedAt.UTC().Format(time.RFC3339)
@@ -164,6 +170,16 @@ func (d deps) watchAdd(ctx context.Context, args watchArgs) watchOut {
 	w, werr := buildWatch(args)
 	if werr != "" {
 		return watchOut{Error: werr}
+	}
+	w.Owner = args.Owner
+	if w.Owner != "" && d.watchOwnerMax > 0 {
+		n, err := d.watchStore.CountByOwner(ctx, w.Owner)
+		if err != nil {
+			return watchOut{Error: "store: " + err.Error()}
+		}
+		if n >= d.watchOwnerMax {
+			return watchOut{Error: fmt.Sprintf("watch cap reached: %d active per owner", d.watchOwnerMax)}
+		}
 	}
 	// Restock needs a stable listing: a query watch re-picks the cheapest
 	// offer each check, and cross-listing availability flips would report
@@ -315,7 +331,7 @@ func watchInterval(minutes int, floor time.Duration, w *watch.Watch) string {
 }
 
 func (d deps) watchList(ctx context.Context, args watchArgs) watchOut {
-	ws, err := d.watchStore.List(ctx, args.IncludeInactive)
+	ws, err := d.watchStore.List(ctx, args.Owner, args.IncludeInactive)
 	if err != nil {
 		return watchOut{Error: err.Error()}
 	}
@@ -336,9 +352,9 @@ func (d deps) watchGet(ctx context.Context, args watchArgs) watchOut {
 	if args.WatchID == 0 {
 		return watchOut{Error: "watch_id required"}
 	}
-	w, err := d.watchStore.Get(ctx, args.WatchID)
+	w, err := d.watchStore.Get(ctx, args.Owner, args.WatchID)
 	if err != nil {
-		return watchOut{Error: fmt.Sprintf("watch %d: %v", args.WatchID, err)}
+		return watchOut{Error: fmt.Sprintf("watch %d not found", args.WatchID)}
 	}
 	e := toWatchEntry(w)
 	e.History = d.watchHistory(ctx, w.ID, args.HistoryLimit)
@@ -363,7 +379,7 @@ func (d deps) watchCancel(ctx context.Context, args watchArgs) watchOut {
 	if args.WatchID == 0 {
 		return watchOut{Error: "watch_id required"}
 	}
-	ok, err := d.watchStore.Cancel(ctx, args.WatchID)
+	ok, err := d.watchStore.Cancel(ctx, args.Owner, args.WatchID)
 	if err != nil {
 		return watchOut{Error: err.Error()}
 	}
@@ -381,9 +397,9 @@ func (d deps) watchCheckNow(ctx context.Context, args watchArgs) watchOut {
 	if d.checker == nil {
 		return watchOut{Error: "checker not running"}
 	}
-	w, err := d.watchStore.Get(ctx, args.WatchID)
+	w, err := d.watchStore.Get(ctx, args.Owner, args.WatchID)
 	if err != nil {
-		return watchOut{Error: fmt.Sprintf("watch %d: %v", args.WatchID, err)}
+		return watchOut{Error: fmt.Sprintf("watch %d not found", args.WatchID)}
 	}
 	updated, obs, err := d.checker.CheckOnce(ctx, w)
 	if err != nil {

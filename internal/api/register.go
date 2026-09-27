@@ -44,6 +44,9 @@ type deps struct {
 	checker    *watch.Checker
 	orderStore orderStorer
 	initErr    error
+	// watchOwnerMax caps active watches per tenant owner (public-bot
+	// abuse bound); 0 = unlimited.
+	watchOwnerMax int
 }
 
 // RegisterTools binds product_search, product_match and product_feedback
@@ -70,7 +73,12 @@ func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config
 		trust:      trust.New(cfg.TrustAllow, cfg.TrustDeny),
 		watchStore: watchStore,
 		checker:    checker,
-		initErr:    initErr,
+		// orderStore must land in deps — without it product_order answers
+		// "unavailable" forever (the REST ingest twin takes the store
+		// directly, which is why the gap went unnoticed).
+		orderStore:    orderStore,
+		watchOwnerMax: cfg.WatchOwnerMax,
+		initErr:       initErr,
 	}
 	registerProductSearch(srv, d)
 	registerProductMatch(srv, d)

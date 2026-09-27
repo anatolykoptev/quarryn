@@ -152,6 +152,7 @@ type webhookPayload struct {
 	Trigger          string `json:"trigger"`
 	WatchID          int64  `json:"watch_id"`
 	Kind             string `json:"kind"`
+	Owner            string `json:"owner,omitempty"` // tg:<chat_id> — the sink resolves the recipient
 	Label            string `json:"label,omitempty"`
 	URL              string `json:"url,omitempty"`
 	Query            string `json:"query,omitempty"`
@@ -176,6 +177,7 @@ func (n *WebhookNotifier) Notify(ctx context.Context, w Watch, obs Observation, 
 		Trigger:          triggerKind(kind),
 		WatchID:          w.ID,
 		Kind:             string(w.Kind),
+		Owner:            w.Owner,
 		Label:            label,
 		URL:              w.URL,
 		Query:            w.Query,
@@ -206,6 +208,29 @@ func (n *WebhookNotifier) Notify(ctx context.Context, w Watch, obs Observation, 
 		return retryAfter(resp), fmt.Errorf("webhook notify: HTTP %d", resp.StatusCode)
 	}
 	return 0, nil
+}
+
+// OwnerPrefixTelegram marks bot-owned watches ("tg:<chat_id>") — the
+// routing notifier sends those to the bot's delivery endpoint instead of
+// the fleet alertmanager.
+const OwnerPrefixTelegram = "tg:"
+
+// RoutingNotifier fans a fired trigger out by owner: tg-owned watches go
+// to the bot webhook (each alert lands in the right chat), everything
+// else to the fleet sink. A nil/absent bot notifier falls back to the
+// fleet sink — misconfiguration degrades to admin-visible alerts, never
+// a silently dropped user notification.
+type RoutingNotifier struct {
+	TG      Notifier // bot delivery endpoint (BOT_NOTIFY_URL), may be nil
+	Default Notifier // fleet sink (alertmanager)
+}
+
+// Notify routes by owner — tg-owned watches to the bot, rest to Default.
+func (r RoutingNotifier) Notify(ctx context.Context, w Watch, obs Observation, kind string) (time.Duration, error) {
+	if r.TG != nil && strings.HasPrefix(w.Owner, OwnerPrefixTelegram) {
+		return r.TG.Notify(ctx, w, obs, kind)
+	}
+	return r.Default.Notify(ctx, w, obs, kind)
 }
 
 // retryAfter parses the Retry-After header — seconds or an HTTP date —
