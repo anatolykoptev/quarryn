@@ -390,7 +390,7 @@ func TestInitErrorStubs(t *testing.T) {
 func TestRegisterToolsSmoke(t *testing.T) {
 	clearSourceEnv(t)
 	srv := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "v0"}, nil)
-	RegisterTools(srv, nil, config.Config{}, NewFeedbackStore(""), nil, nil, nil, errors.New("pipeline down"))
+	RegisterTools(srv, nil, config.Config{}, NewFeedbackStore(""), nil, nil, nil, nil, errors.New("pipeline down"))
 }
 
 // TestClampMaxResults bounds.

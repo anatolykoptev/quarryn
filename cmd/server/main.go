@@ -15,6 +15,7 @@ import (
 	"github.com/anatolykoptev/go-product-search/internal/api"
 	"github.com/anatolykoptev/go-product-search/internal/auth"
 	"github.com/anatolykoptev/go-product-search/internal/config"
+	"github.com/anatolykoptev/go-product-search/internal/orders"
 	"github.com/anatolykoptev/go-product-search/internal/postgres"
 	"github.com/anatolykoptev/go-product-search/internal/probe"
 	"github.com/anatolykoptev/go-product-search/internal/search"
@@ -39,22 +40,7 @@ func main() {
 // mcpserver.Serve owns the lifecycle: signal.NotifyContext(SIGINT/SIGTERM) →
 // graceful shutdown with cfg.ShutdownTimeout.
 func runMCPServer(cfg config.Config) error {
-	// The ADR-10 outcome sink is built once and shared by the
-	// product_feedback tool and the POST /api/v1/feedback REST twin.
-	// Unwritable path → log-only mode, never fatal.
-	var pgdb *postgres.DB
-	if cfg.DatabaseURL != "" {
-		db, err := postgres.New(context.Background(), cfg.DatabaseURL)
-		if err != nil {
-			// The outcome sink is not worth killing the service over —
-			// degrade to the JSONL path and say so loudly.
-			slog.Error("postgres unavailable — feedback falls back to JSONL",
-				slog.Any("error", err))
-		} else {
-			pgdb = db
-		}
-	}
-	feedback := api.NewFeedbackStorePG(cfg.FeedbackFile, pgdb)
+	pgdb, feedback, orderStore := openStores(cfg)
 	hooks := mcpserver.MCPHooks{
 		OnToolResult: func(_ context.Context, name string, dur time.Duration, isErr bool) {
 			slog.Info("tool_result", slog.String("tool", name),
@@ -76,6 +62,9 @@ func runMCPServer(cfg config.Config) error {
 		// The feedback REST twin — same store as the product_feedback MCP
 		// tool, for callers that want a plain POST.
 		mux.HandleFunc("POST /api/v1/feedback", feedback.FeedbackHandler())
+		// Order-confirmation ingest — forward-friendly raw .eml body; the
+		// bearer middleware still guards it like every non-healthz route.
+		mux.Handle("POST /api/v1/orders/ingest", api.OrdersIngestHandler(orderStore))
 	}
 	return mcpserver.Serve(&mcp.Implementation{
 		Name:    "go-product-search",
@@ -91,7 +80,7 @@ func runMCPServer(cfg config.Config) error {
 			slog.Error("search pipeline init failed", slog.Any("error", err))
 		}
 		watchStore, checker := newWatcher(searcher, pgdb, cfg, err)
-		api.RegisterTools(srv, searcher, cfg, feedback, probeRunner(searcher, cfg), watchStore, checker, err)
+		api.RegisterTools(srv, searcher, cfg, feedback, probeRunner(searcher, cfg), watchStore, checker, orderStore, err)
 	})
 }
 
@@ -118,6 +107,29 @@ func newWatcher(s *search.Searcher, pgdb *postgres.DB, cfg config.Config, initEr
 	go ch.Run(context.Background())
 	slog.Info("watch checker started", slog.Duration("tick", cfg.WatchTick))
 	return st, ch
+}
+
+// openStores builds the pg-backed state: pool, feedback sink (ADR-10,
+// JSONL fallback when pg is down), and the orders store (issue #57).
+// pg is optional — a missing/unreachable database degrades to file-only
+// feedback and disables watches/orders, never kills the service.
+func openStores(cfg config.Config) (*postgres.DB, *api.FeedbackStore, *orders.Store) {
+	var pgdb *postgres.DB
+	if cfg.DatabaseURL != "" {
+		db, err := postgres.New(context.Background(), cfg.DatabaseURL)
+		if err != nil {
+			slog.Error("postgres unavailable — feedback falls back to JSONL",
+				slog.Any("error", err))
+		} else {
+			pgdb = db
+		}
+	}
+	feedback := api.NewFeedbackStorePG(cfg.FeedbackFile, pgdb)
+	var orderStore *orders.Store
+	if pgdb != nil {
+		orderStore = orders.NewStore(pgdb.Pool())
+	}
+	return pgdb, feedback, orderStore
 }
 
 // probeRunner picks the acceptance-probe backend: the pipeline's own
