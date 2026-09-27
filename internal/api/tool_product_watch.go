@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	enginesources "github.com/anatolykoptev/go-engine/sources"
@@ -24,11 +26,10 @@ import (
 //
 // watchStorer is the api seam — *watch.Store in prod, a fake in tests.
 type watchStorer interface {
-	Create(ctx context.Context, w *watch.Watch) error
+	Create(ctx context.Context, w *watch.Watch, max int) error
 	List(ctx context.Context, owner string, includeInactive bool) ([]watch.Watch, error)
 	Get(ctx context.Context, owner string, id int64) (watch.Watch, error)
 	Cancel(ctx context.Context, owner string, id int64) (bool, error)
-	CountByOwner(ctx context.Context, owner string) (int, error)
 	History(ctx context.Context, id int64, limit int) ([]watch.Observation, error)
 }
 type watchArgs struct {
@@ -172,15 +173,6 @@ func (d deps) watchAdd(ctx context.Context, args watchArgs) watchOut {
 		return watchOut{Error: werr}
 	}
 	w.Owner = args.Owner
-	if w.Owner != "" && d.watchOwnerMax > 0 {
-		n, err := d.watchStore.CountByOwner(ctx, w.Owner)
-		if err != nil {
-			return watchOut{Error: "store: " + err.Error()}
-		}
-		if n >= d.watchOwnerMax {
-			return watchOut{Error: fmt.Sprintf("watch cap reached: %d active per owner", d.watchOwnerMax)}
-		}
-	}
 	// Restock needs a stable listing: a query watch re-picks the cheapest
 	// offer each check, and cross-listing availability flips would report
 	// false restocks (Devin Review #101). DB enforces the same shape.
@@ -198,7 +190,12 @@ func (d deps) watchAdd(ctx context.Context, args watchArgs) watchOut {
 	if werr != "" {
 		return watchOut{Error: werr}
 	}
-	if err := d.watchStore.Create(ctx, &w); err != nil {
+	// The cap travels into Create — count+insert run under one per-owner
+	// advisory lock, so concurrent adds can't overshoot (Review #106).
+	if err := d.watchStore.Create(ctx, &w, d.watchOwnerMax); err != nil {
+		if errors.Is(err, watch.ErrWatchCap) {
+			return watchOut{Error: fmt.Sprintf("watch cap reached: %d active per owner", d.watchOwnerMax)}
+		}
 		return watchOut{Error: "store: " + err.Error()}
 	}
 	e := toWatchEntry(w)
@@ -348,13 +345,23 @@ func (d deps) watchList(ctx context.Context, args watchArgs) watchOut {
 
 // watchGet is the single-watch read — history attaches by default
 // (bounded to history_limit).
+// watchErr maps store errors without leaking existence: a missing or
+// foreign-owned row is "not found", a real outage stays an error
+// (Devin Review #106 — a dead Postgres must not read as "no watch").
+func watchErr(id int64, err error) string {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Sprintf("watch %d not found", id)
+	}
+	return "store: " + err.Error()
+}
+
 func (d deps) watchGet(ctx context.Context, args watchArgs) watchOut {
 	if args.WatchID == 0 {
 		return watchOut{Error: "watch_id required"}
 	}
 	w, err := d.watchStore.Get(ctx, args.Owner, args.WatchID)
 	if err != nil {
-		return watchOut{Error: fmt.Sprintf("watch %d not found", args.WatchID)}
+		return watchOut{Error: watchErr(args.WatchID, err)}
 	}
 	e := toWatchEntry(w)
 	e.History = d.watchHistory(ctx, w.ID, args.HistoryLimit)
@@ -399,7 +406,7 @@ func (d deps) watchCheckNow(ctx context.Context, args watchArgs) watchOut {
 	}
 	w, err := d.watchStore.Get(ctx, args.Owner, args.WatchID)
 	if err != nil {
-		return watchOut{Error: fmt.Sprintf("watch %d not found", args.WatchID)}
+		return watchOut{Error: watchErr(args.WatchID, err)}
 	}
 	updated, obs, err := d.checker.CheckOnce(ctx, w)
 	if err != nil {

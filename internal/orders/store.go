@@ -34,7 +34,7 @@ func (s *Store) Upsert(ctx context.Context, o *Order) (created bool, err error) 
 			total_minor, currency, label, email_from, subject, return_by,
 			tracking_no, carrier, track_url, owner)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-		ON CONFLICT (retailer_domain, order_no) WHERE order_no <> ''
+		ON CONFLICT (retailer_domain, order_no, owner) WHERE order_no <> ''
 		DO UPDATE SET
 			total_minor  = COALESCE(orders.total_minor,  EXCLUDED.total_minor),
 			currency     = COALESCE(NULLIF(orders.currency,''), EXCLUDED.currency),

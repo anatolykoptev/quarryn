@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -44,7 +45,7 @@ func TestLivePGWatches(t *testing.T) {
 		ExpiresAt:        time.Now().Add(time.Hour),
 		Status:           StatusActive,
 	}
-	if err := st.Create(ctx, w); err != nil {
+	if err := st.Create(ctx, w, 0); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	got, err := st.Get(ctx, "", w.ID)
@@ -79,7 +80,7 @@ func mustLiveWatch(t *testing.T, st *Store, owner, slug string) *Watch {
 		ExpiresAt: time.Now().Add(time.Hour), Status: StatusActive,
 		Owner: owner,
 	}
-	if err := st.Create(context.Background(), w); err != nil {
+	if err := st.Create(context.Background(), w, 0); err != nil {
 		t.Fatalf("create %s: %v", slug, err)
 	}
 	return w
@@ -139,5 +140,35 @@ func TestLivePGWatchOwnerMutate(t *testing.T) {
 	}
 	if n, err := st.CountByOwner(ctx, owner); err != nil || n != 0 {
 		t.Fatalf("count after cancel: %v %d", err, n)
+	}
+}
+
+// TestLivePGWatchOwnerCap — the cap is atomic at the store: max=1 admits
+// the first add, refuses the second with ErrWatchCap, and an expired
+// row does not count (Review #106 — expiry must not pin the cap).
+func TestLivePGWatchOwnerCap(t *testing.T) {
+	ctx := context.Background()
+	st := NewStore(pgConnect(t).Pool())
+	owner := fmt.Sprintf("tg:cap-%d", time.Now().UnixNano()%1e6)
+
+	// An already-expired row: capped count must ignore it.
+	dead := mustLiveWatch(t, st, owner, "capdead")
+	if _, err := st.pool.Exec(ctx,
+		`UPDATE watches SET expires_at = now() - interval '1h' WHERE id=$1`, dead.ID); err != nil {
+		t.Fatalf("expire fixture: %v", err)
+	}
+	live := mustLiveWatch(t, st, owner, "caplive")
+	t.Cleanup(func() { _, _ = st.Cancel(context.Background(), owner, live.ID) })
+	t.Cleanup(func() { _, _ = st.Cancel(context.Background(), owner, dead.ID) })
+
+	next := &Watch{
+		Kind: KindOffer, URL: "https://example.com/deal/cap2",
+		OfferID: "url|cap2", NotifyOn: NotifyRestock,
+		Currency: "USD", Interval: time.Hour,
+		ExpiresAt: time.Now().Add(time.Hour), Status: StatusActive,
+		Owner: owner,
+	}
+	if err := st.Create(ctx, next, 1); !errors.Is(err, ErrWatchCap) {
+		t.Fatalf("second add with max=1: err=%v, want ErrWatchCap", err)
 	}
 }

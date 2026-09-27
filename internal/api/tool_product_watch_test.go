@@ -14,10 +14,17 @@ type fakeWatchStore struct {
 	created    *watch.Watch
 	cancelled  int64
 	ownerSeen  []string // every owner arg a scoped call carried
-	ownerCount int
+	maxSeen    int      // cap arg Create received
+	ownerCount int      // rows the fake pretends already exist
 }
 
-func (f *fakeWatchStore) Create(_ context.Context, w *watch.Watch) error {
+// Create mirrors the store contract: the cap travels in via max, and the
+// refusal is the sentinel — the api layer maps it, nothing else counts.
+func (f *fakeWatchStore) Create(_ context.Context, w *watch.Watch, max int) error {
+	f.maxSeen = max
+	if max > 0 && w.Owner != "" && f.ownerCount >= max {
+		return watch.ErrWatchCap
+	}
 	w.ID = 7
 	f.created = w
 	return nil
@@ -37,11 +44,6 @@ func (f *fakeWatchStore) Cancel(_ context.Context, owner string, id int64) (bool
 	f.ownerSeen = append(f.ownerSeen, owner)
 	f.cancelled = id
 	return true, nil
-}
-
-func (f *fakeWatchStore) CountByOwner(_ context.Context, owner string) (int, error) {
-	f.ownerSeen = append(f.ownerSeen, owner)
-	return f.ownerCount, nil
 }
 
 func (f *fakeWatchStore) History(context.Context, int64, int) ([]watch.Observation, error) {
@@ -73,13 +75,13 @@ func TestWatchOwnerScoping(t *testing.T) {
 			t.Errorf("call %d carried owner %q, want tg:42", i, o)
 		}
 	}
-	if len(st.ownerSeen) < 3 { // list + get + cancel (count needs max>0)
-		t.Fatalf("owner path seen %d calls, want >=3", len(st.ownerSeen))
+	if len(st.ownerSeen) != 3 { // list + get + cancel — cap rides Create
+		t.Fatalf("owner path seen %d calls, want 3", len(st.ownerSeen))
 	}
 }
 
-// The per-owner cap is the public-bot abuse bound — a tenant past the
-// cap must be refused before Create.
+// The per-owner cap is the public-bot abuse bound — the api hands the
+// configured max to Create, which enforces it atomically in the store.
 func TestWatchOwnerCap(t *testing.T) {
 	d := watchDeps()
 	d.watchOwnerMax = 2
@@ -95,8 +97,11 @@ func TestWatchOwnerCap(t *testing.T) {
 	if !strings.Contains(out.Error, "cap") {
 		t.Fatalf("cap error %q lacks 'cap'", out.Error)
 	}
+	if st.maxSeen != 2 {
+		t.Fatalf("Create received max=%d, want 2", st.maxSeen)
+	}
 
-	// Fleet (ownerless) adds are uncapped.
+	// Fleet (ownerless) adds are uncapped — the store skips the lock.
 	a.Owner = ""
 	if out := d.watchAdd(context.Background(), a); !out.OK {
 		t.Fatalf("ownerless add rejected: %s", out.Error)

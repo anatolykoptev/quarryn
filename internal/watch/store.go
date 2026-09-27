@@ -3,10 +3,12 @@ package watch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -28,14 +30,54 @@ type Store struct {
 // postgres.Run already applied them at startup).
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
+// ErrWatchCap is Create's refusal when the owner already holds max
+// active watches — the public-bot abuse bound (WATCH_OWNER_MAX).
+var ErrWatchCap = errors.New("watch cap reached")
+
 // Create inserts a watch, validating invariant shapes at the SQL layer
-// (CHECK constraints) and in the API layer before that.
-func (s *Store) Create(ctx context.Context, w *Watch) error {
+// (CHECK constraints) and in the API layer before that. max>0 caps the
+// owner's live watches — enforced atomically under a per-owner advisory
+// lock so concurrent adds can't race the count (Devin Review #106).
+// Ownerless rows are uncapped (fleet callers).
+func (s *Store) Create(ctx context.Context, w *Watch, max int) error {
 	crit, err := json.Marshal(w.Criteria)
 	if err != nil {
 		return fmt.Errorf("marshal criteria: %w", err)
 	}
-	err = s.pool.QueryRow(ctx, `
+	if w.Owner == "" || max <= 0 {
+		return s.insert(ctx, s.pool, w, crit)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err = tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtext($1))`, w.Owner); err != nil {
+		return err
+	}
+	var n int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM watches
+		WHERE owner=$1 AND status='active' AND expires_at > now()`, w.Owner).
+		Scan(&n); err != nil {
+		return err
+	}
+	if n >= max {
+		return ErrWatchCap
+	}
+	if err = s.insert(ctx, tx, w, crit); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// queryRower is the shared row-returning seam of pool and tx.
+type queryRower interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (s *Store) insert(ctx context.Context, q queryRower, w *Watch, crit []byte) error {
+	return q.QueryRow(ctx, `
 		INSERT INTO watches (kind, offer_id, native_id, url, label, query,
 			criteria, target_price_minor, currency, interval_minutes,
 			expires_at, next_check_after, notify_on, target_pct,
@@ -47,7 +89,6 @@ func (s *Store) Create(ctx context.Context, w *Watch) error {
 		int(w.Interval.Minutes()), w.ExpiresAt,
 		w.NotifyOn, w.TargetPct, w.ConditionText, w.Owner).
 		Scan(&w.ID, &w.CreatedAt)
-	return err
 }
 
 // List returns watches; inactive ones only when includeInactive.
@@ -145,12 +186,13 @@ func (s *Store) Due(ctx context.Context, limit int, now time.Time) ([]Watch, err
 	return out, rows.Err()
 }
 
-// CountByOwner is the per-tenant watch cap input (issue #100 arc —
-// public bot users can't mint unbounded watches).
+// CountByOwner reports live (active, unexpired) watches for a tenant —
+// expired rows must not count: nothing flips their status, so they would
+// pin the cap forever (Devin Review #106).
 func (s *Store) CountByOwner(ctx context.Context, owner string) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx,
-		`SELECT count(*) FROM watches WHERE owner=$1 AND status='active'`, owner).Scan(&n)
+		`SELECT count(*) FROM watches WHERE owner=$1 AND status='active' AND expires_at > now()`, owner).Scan(&n)
 	return n, err
 }
 

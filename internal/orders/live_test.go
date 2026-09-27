@@ -99,4 +99,16 @@ func TestLivePGOrdersOwner(t *testing.T) {
 	if ok, _ := st.Mark(ctx, "tg:other", owned.ID, StatusCancelled); ok {
 		t.Fatal("foreign-owner Mark must refuse")
 	}
+
+	// Same order_no under a second tenant is a SEPARATE row — dedupe is
+	// per-owner, one tenant must never merge into another's order
+	// (Devin Review #106).
+	other, created, err := Ingest(ctx, st, eml, "tg:someone")
+	if err != nil || !created || other.ID == owned.ID {
+		t.Fatalf("cross-tenant ingest must create: created=%v id=%d err=%v", created, other.ID, err)
+	}
+	again, _, err := st.Get(ctx, owner, owned.ID)
+	if err != nil || again.ID != owned.ID {
+		t.Fatalf("original row intact: %v %d", err, again.ID)
+	}
 }
