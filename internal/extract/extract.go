@@ -699,6 +699,7 @@ func productFromCandidate(c sources.Candidate) Product {
 		ImageURL:     c.ImageURL,
 		Description:  c.Content,
 		Source:       domainOf(c.URL),
+		OfferID:      c.OfferID,
 		Method:       MethodSERP,
 	}
 }
