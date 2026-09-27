@@ -4,17 +4,29 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/anatolykoptev/quarryn/internal/extract"
 )
+
+// ConditionEvaluator is the subjective gate behind Watch.ConditionText
+// (issue #96): a fired deterministic trigger still has to satisfy the
+// free-form condition — "sold by the brand store", "still under
+// warranty". The match service implements it in prod; nil disables the
+// gate (condition watches record observations but never notify).
+type ConditionEvaluator interface {
+	EvaluateCondition(ctx context.Context, condition string, p extract.Product) (bool, error)
+}
 
 // Checker is the watch scheduler: a ticker over the due-scan, one
 // observation + state transition + optional notify per watch. Single
 // goroutine — the fleet is single-instance, and per-tick caps keep one
 // stuck watch from starving the rest.
 type Checker struct {
-	Store    Storer
-	Observer Observer
-	Notify   Notifier
-	Now      func() time.Time // test seam; nil → time.Now
+	Store     Storer
+	Observer  Observer
+	Notify    Notifier
+	Evaluator ConditionEvaluator // nil → condition watches never fire
+	Now       func() time.Time   // test seam; nil → time.Now
 	// Bounds.
 	Tick        time.Duration // WATCH_TICK; the idle scan period
 	MaxPerTick  int           // WATCH_MAX_PER_TICK
@@ -95,7 +107,9 @@ func (c *Checker) check(ctx context.Context, w Watch) (Watch, Observation, error
 	obs.WatchID = w.ID
 	obs.TS = now
 
-	// State transition.
+	// State transition. prevAvail is captured before the update — the
+	// restock trigger reads the transition, not the settled state.
+	prevAvail := w.LastAvailability
 	w.LastCheckedAt = &now
 	w.NextCheckAfter = now.Add(w.Interval)
 	w.LastPriceMinor = obs.PriceMinor
@@ -108,6 +122,12 @@ func (c *Checker) check(ctx context.Context, w Watch) (Watch, Observation, error
 		if w.Status == StatusUnverifiable {
 			w.Status = StatusActive // a stale-looking listing came back
 		}
+		// pct-drop anchor (issue #94): the first ok observation fixes the
+		// baseline — later drops measure from it.
+		if w.BaselineMinor == nil && obs.PriceMinor != nil {
+			b := *obs.PriceMinor
+			w.BaselineMinor = &b
+		}
 	case OutcomeExtractEmpty:
 		w.ConsecFailures++
 		if w.Kind == KindOffer && w.ConsecFailures >= unverifiableAfter {
@@ -117,16 +137,64 @@ func (c *Checker) check(ctx context.Context, w Watch) (Watch, Observation, error
 	default: // fetch_failed, no_offers — transient, don't count toward unverifiable
 	}
 
-	if !w.shouldNotify(obs) {
+	if !w.shouldNotify(prevAvail, obs) {
 		return w, obs, c.Store.Record(ctx, &w, obs)
 	}
-	return w, obs, c.notify(ctx, &w, obs, now)
+	return w, obs, c.gateAndNotify(ctx, &w, obs, prevAvail, now)
+}
+
+// gateAndNotify runs the subjective condition gate on a firing trigger,
+// then notifies. The gate's verdict split (issue #96, review #101): a
+// deliberate rejection suppresses the alert for good — the observation
+// commits the transition, no retry owed; an evaluation ERROR is
+// retryable — the availability update rolls back so a restock
+// transition re-arms next check instead of being swallowed.
+func (c *Checker) gateAndNotify(ctx context.Context, w *Watch, obs Observation, prevAvail string, now time.Time) error {
+	if w.ConditionText != "" && !w.NotifyPending {
+		pass, retryable, detail := c.evalCondition(ctx, *w, obs)
+		if !pass {
+			if retryable {
+				w.LastAvailability = prevAvail
+			}
+			obs.Detail = detail
+			return c.Store.Record(ctx, w, obs)
+		}
+	}
+	return c.notify(ctx, w, obs, now, w.trigger(prevAvail, obs))
+}
+
+// evalCondition runs the subjective gate. Returns (pass, retryable,
+// detail): retryable marks "couldn't evaluate" (nil evaluator, missing
+// product, transport error) — the caller must not commit the restock
+// transition for a check that never reached a verdict. A clean
+// rejection is permanent.
+func (c *Checker) evalCondition(ctx context.Context, w Watch, obs Observation) (bool, bool, string) {
+	if c.Evaluator == nil || obs.Product == nil {
+		return false, true, "condition unevaluated: match service unavailable"
+	}
+	ok, err := c.Evaluator.EvaluateCondition(ctx, w.ConditionText, *obs.Product)
+	if err != nil {
+		return false, true, "condition unevaluated: " + err.Error()
+	}
+	if !ok {
+		return false, false, "condition not met: " + w.ConditionText
+	}
+	return true, false, ""
 }
 
 // notify is the boundary where a check ends — the only outbound effect.
 // Pending overrides dedupe: at-least-once means a recorded-but-undelivered
-// alert retries until the notifier acks.
-func (c *Checker) notify(ctx context.Context, w *Watch, obs Observation, now time.Time) error {
+// alert retries until the notifier acks. kind names the trigger that
+// fired ("price"|"restock"); pending retries recompute it from the fresh
+// observation and may pass "".
+func (c *Checker) notify(ctx context.Context, w *Watch, obs Observation, now time.Time, kind string) error {
+	// A fresh fire captures its trigger; a retry of a pending alert reuses
+	// the captured one — recomputing against the settled observation
+	// would label a restock retry "unknown" (Devin Review #101).
+	if w.PendingTrigger == "" {
+		w.PendingTrigger = kind
+	}
+	kind = w.PendingTrigger
 	w.NotifyPending = true
 	w.LastNotifyAttemptAt = &now
 	// Persist the pending flag BEFORE sending — a crash between send and
@@ -134,7 +202,7 @@ func (c *Checker) notify(ctx context.Context, w *Watch, obs Observation, now tim
 	if err := c.Store.Record(ctx, w, obs); err != nil {
 		return err
 	}
-	retryAfter, nerr := c.Notify.Notify(ctx, *w, obs)
+	retryAfter, nerr := c.Notify.Notify(ctx, *w, obs, kind)
 	if nerr != nil {
 		// Pending stays set; retryAfter pushes the next attempt out.
 		w.NextCheckAfter = now.Add(retryAfter)
@@ -144,6 +212,7 @@ func (c *Checker) notify(ctx context.Context, w *Watch, obs Observation, now tim
 		})
 	}
 	w.NotifyPending = false
+	w.PendingTrigger = ""
 	w.NotifiedPriceMinor = obs.PriceMinor
 	w.NotifiedAt = &now
 	w.NotifyCount++

@@ -24,12 +24,14 @@ func TestLivePGWatches(t *testing.T) {
 	defer db.Close()
 
 	st := NewStore(db.Pool())
+	target := int64(999)
 	w := &Watch{
 		Kind:             KindOffer,
 		URL:              "https://example.com/deal/1",
 		OfferID:          "url|deadbeef",
 		Label:            "live smoke",
-		TargetPriceMinor: 999,
+		NotifyOn:         NotifyPrice,
+		TargetPriceMinor: &target,
 		Currency:         "USD",
 		Interval:         time.Hour,
 		ExpiresAt:        time.Now().Add(time.Hour),
@@ -42,8 +44,13 @@ func TestLivePGWatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.TargetPriceMinor != 999 || got.Kind != KindOffer {
+	if got.TargetPriceMinor == nil || *got.TargetPriceMinor != 999 ||
+		got.Kind != KindOffer || got.NotifyOn != NotifyPrice {
 		t.Fatalf("round-trip mismatch: %+v", got)
+	}
+	// History is the observation ledger read-back (issue #95).
+	if _, err := st.History(ctx, w.ID, 10); err != nil {
+		t.Fatalf("history: %v", err)
 	}
 	if err := st.Record(ctx, &got, Observation{
 		Outcome: OutcomeOK, Currency: "USD", Detail: "smoke",

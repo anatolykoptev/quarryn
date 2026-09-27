@@ -40,7 +40,7 @@ Persisted to Postgres `feedback` (file fallback if PG is down).
 
 ### `product_watch`
 
-Price watches on Postgres. `action`: `add | list | cancel | check_now`.
+Price/restock watches on Postgres. `action`: `add | list | get | cancel | check_now`.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -48,16 +48,23 @@ Price watches on Postgres. `action`: `add | list | cancel | check_now`.
 | `url` / `offer_id` | string | `add kind=offer`: page to re-fetch; `offer_id` optional stable id |
 | `query` / `criteria` | string / string[] | `add kind=query`: search text + criteria |
 | `label` | string | Human name for notifications |
-| `target_price` | float | Notify when price ≤ target (1% re-notify bucket) |
+| `notify_on` | `price\|restock\|any` | Default `price`. `restock` fires on unbuyable→buyable transitions (`out_of_stock\|discontinued` → any orderable state); `any` = either trigger |
+| `target_price` | float | Notify when price ≤ target (1% re-notify bucket). Required for `price`/`any` unless `target_pct` is set |
+| `target_pct` | int 1–99 | Notify when price drops ≥N% from the first observed price (baseline) |
+| `condition` | string | Optional free-form gate evaluated per check by the match service (needs `JEFF_URL`); a fired trigger notifies only if the condition passes. Max 500 runes |
 | `currency` | string | ISO 4217, required |
 | `ttl_hours` | int | Watch lifetime, default 720 (30d), capped 90d |
 | `interval_minutes` | int | Check cadence; floors 60 (offer) / 360 (query) |
-| `watch_id` | int | `cancel` / `check_now` target |
+| `watch_id` | int | `get` / `cancel` / `check_now` target |
 | `include_inactive` | bool | `list`: include cancelled/expired |
+| `history` / `history_limit` | bool / int | `list`: attach observation history per watch (newest first). `get` always includes history. Default 100 rows, max 500 |
 
-Notifications go through an Alertmanager v4 webhook (`WATCH_NOTIFY_URL`). Offers that stop
+Notifications go through an Alertmanager v4 webhook (`WATCH_NOTIFY_URL`)
+with a `trigger` label (`price`/`restock`). Offers that stop
 being extractable become `unverifiable` after repeated failures and stop
-consuming budget.
+consuming budget. A `condition` whose evaluator is unreachable or
+rejects the observation fails closed — the check records the reason and
+no alert is sent.
 
 ### `product_order`
 

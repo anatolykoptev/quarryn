@@ -63,6 +63,7 @@ func (o *SearcherObserver) observeOffer(ctx context.Context, w Watch) Observatio
 		OfferURL:     offerURL,
 		OfferID:      w.OfferID,
 		Outcome:      OutcomeOK,
+		Product:      p,
 	}
 }
 
@@ -101,6 +102,7 @@ func (o *SearcherObserver) observeQuery(ctx context.Context, w Watch) Observatio
 		OfferURL:     bestURL,
 		OfferID:      bestID,
 		Outcome:      OutcomeOK,
+		Product:      best,
 	}
 }
 

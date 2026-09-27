@@ -8,7 +8,11 @@
 // HTTP call site is notify.go (architecturally pinned by a test).
 package watch
 
-import "time"
+import (
+	"time"
+
+	"github.com/anatolykoptev/quarryn/internal/extract"
+)
 
 // Kind enumerates the two watch shapes from the spec.
 type Kind string
@@ -29,6 +33,20 @@ const (
 	StatusCancelled    = "cancelled"
 	StatusUnverifiable = "unverifiable"
 )
+
+// NotifyOn selects which triggers can fire a check (issue #93): price
+// hits only, restock transitions only, or either.
+const (
+	NotifyPrice   = "price"
+	NotifyRestock = "restock"
+	NotifyAny     = "any"
+)
+
+// buyable/unbuyable split the availability enum (extract/validate.go) on
+// the line a restock crosses: out_of_stock|discontinued → any orderable
+// state fires the restock trigger.
+var unbuyable = map[string]bool{"out_of_stock": true, "discontinued": true}
+var buyable = map[string]bool{"in_stock": true, "pre_order": true, "backorder": true, "limited": true}
 
 // Observation outcomes — the per-check ledger vocabulary.
 const (
@@ -51,20 +69,30 @@ const (
 
 // Watch is one row of the watches table.
 type Watch struct {
-	ID               int64
-	CreatedAt        time.Time
-	ExpiresAt        time.Time
-	Kind             Kind
-	OfferID          string // codec identity (url|… fallback allowed)
-	NativeID         bool   // offer_id carries a native listing id
-	URL              string // offer: re-fetch target; query: last winner
-	Label            string
-	Query            string
-	Criteria         []string
-	TargetPriceMinor int64
-	Currency         string
-	Interval         time.Duration
-	Status           string
+	ID        int64
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	Kind      Kind
+	OfferID   string // codec identity (url|… fallback allowed)
+	NativeID  bool   // offer_id carries a native listing id
+	URL       string // offer: re-fetch target; query: last winner
+	Label     string
+	Query     string
+	Criteria  []string
+	// Triggers — at least one applies (SQL CHECK): absolute price target,
+	// percent-drop from baseline, or a notify_on mode that includes
+	// restock. TargetPriceMinor is nil for pct-only and pure restock
+	// watches.
+	TargetPriceMinor *int64
+	TargetPct        *int   // % drop from BaselineMinor (issue #94)
+	BaselineMinor    *int64 // pct anchor — first ok observation sets it
+	NotifyOn         string // price | restock | any (issue #93)
+	// ConditionText gates a fired trigger through the match service
+	// (issue #96); empty = deterministic only.
+	ConditionText string
+	Currency      string
+	Interval      time.Duration
+	Status        string
 
 	LastCheckedAt    *time.Time
 	NextCheckAfter   time.Time
@@ -73,6 +101,7 @@ type Watch struct {
 	ConsecFailures   int
 
 	NotifyPending       bool
+	PendingTrigger      string // which trigger the pending alert owes (restock|price)
 	LastNotifyAttemptAt *time.Time
 	NotifiedPriceMinor  *int64
 	NotifiedAt          *time.Time
@@ -80,6 +109,8 @@ type Watch struct {
 }
 
 // Observation is one check's outcome — also the price-history row.
+// Product is populated by the observer for the condition evaluator; it
+// is transient (never persisted, never marshalled).
 type Observation struct {
 	WatchID      int64
 	TS           time.Time
@@ -90,6 +121,7 @@ type Observation struct {
 	OfferID      string
 	Outcome      string
 	Detail       string
+	Product      *extract.Product `json:"-"`
 }
 
 // Due reports whether the watch wants a check now.
@@ -99,23 +131,68 @@ func (w Watch) Due(now time.Time) bool {
 		!w.NextCheckAfter.After(now)
 }
 
-// shouldNotify applies the target hit + the 1%-of-target dedupe bucket:
-// a price at/under target notifies; a further drop re-notifies only when
-// it exceeds 1% of the target — jitter inside the bucket doesn't.
+// effectiveTarget is the price threshold that fires — the looser of the
+// absolute target and the pct-of-baseline drop (issue #94: whichever
+// fires first). 0 = no price trigger configured.
+func (w Watch) effectiveTarget() int64 {
+	var tgt int64
+	if w.TargetPriceMinor != nil {
+		tgt = *w.TargetPriceMinor
+	}
+	if w.TargetPct != nil && w.BaselineMinor != nil {
+		if pct := *w.BaselineMinor * int64(100-*w.TargetPct) / 100; pct > tgt {
+			tgt = pct
+		}
+	}
+	return tgt
+}
+
+// trigger reports which trigger an ok observation fires — "restock" or
+// "price" — given the watch's pre-check availability (the transition is
+// only visible before LastAvailability updates). Restock wins: a
+// simultaneous price hit must not dedupe-suppress the transition, and
+// the restock label is the more informative alert. Empty = nothing.
+// Restock is offer-kind only — a query watch re-picks the cheapest offer
+// per check, so cross-listing availability flips are not restocks.
+func (w Watch) trigger(prevAvail string, obs Observation) string {
+	if obs.Outcome != OutcomeOK {
+		return ""
+	}
+	if w.Kind == KindOffer &&
+		(w.NotifyOn == NotifyRestock || w.NotifyOn == NotifyAny) &&
+		unbuyable[prevAvail] && buyable[obs.Availability] {
+		return "restock"
+	}
+	if (w.NotifyOn == NotifyPrice || w.NotifyOn == NotifyAny) && w.priceHit(obs) {
+		return "price"
+	}
+	return ""
+}
+
+func (w Watch) priceHit(obs Observation) bool {
+	if obs.PriceMinor == nil {
+		return false
+	}
+	tgt := w.effectiveTarget()
+	return tgt > 0 && *obs.PriceMinor <= tgt
+}
+
+// shouldNotify applies the trigger + dedupe. Price hits re-notify only
+// past the 1%-of-effective-target bucket — jitter inside doesn't. A
+// restock needs no bucket: the availability transition dedupes itself.
 // notify_pending always overrides (at-least-once beats dedupe).
-func (w Watch) shouldNotify(obs Observation) bool {
+func (w Watch) shouldNotify(prevAvail string, obs Observation) bool {
 	if w.NotifyPending {
 		return true
 	}
-	if obs.Outcome != OutcomeOK || obs.PriceMinor == nil {
-		return false
-	}
-	price := *obs.PriceMinor
-	if price > w.TargetPriceMinor {
-		return false
-	}
-	if w.NotifiedPriceMinor == nil {
+	switch w.trigger(prevAvail, obs) {
+	case "price":
+		if w.NotifiedPriceMinor == nil {
+			return true
+		}
+		return *w.NotifiedPriceMinor-*obs.PriceMinor > w.effectiveTarget()/100
+	case "restock":
 		return true
 	}
-	return *w.NotifiedPriceMinor-price > w.TargetPriceMinor/100
+	return false
 }

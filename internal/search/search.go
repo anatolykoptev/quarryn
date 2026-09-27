@@ -161,6 +161,14 @@ func (s *Searcher) AdapterStatus() map[string]bool {
 	return out
 }
 
+// EvaluateCondition is the watch checker's ConditionEvaluator seam
+// (issue #96): one free-form condition against one observed product,
+// answered by the match service. Degrade-mode matchers error, and the
+// checker fails closed.
+func (s *Searcher) EvaluateCondition(ctx context.Context, condition string, p extract.Product) (bool, error) {
+	return s.matcher.EvaluateCondition(ctx, condition, p)
+}
+
 // Search runs the full pipeline for query under criteria and returns
 // judged candidates. criteria mixes deterministic constraints
 // ("price_max:500", "brand:sony", "not_keyword:refurbished",

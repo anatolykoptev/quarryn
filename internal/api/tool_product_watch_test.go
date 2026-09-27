@@ -34,6 +34,10 @@ func (f *fakeWatchStore) Cancel(_ context.Context, id int64) (bool, error) {
 	return true, nil
 }
 
+func (f *fakeWatchStore) History(context.Context, int64, int) ([]watch.Observation, error) {
+	return nil, nil
+}
+
 func watchDeps() deps {
 	return deps{watchStore: &fakeWatchStore{}}
 }
@@ -63,6 +67,16 @@ func TestWatchAddValidation(t *testing.T) {
 			a.IntervalMinutes = 5
 		}, "floor"},
 		{"bad offer_id", func(a *watchArgs) { a.OfferID = "garbage" }, "offer_id"},
+		{"bad notify_on", func(a *watchArgs) { a.NotifyOn = "hourly" }, "notify_on"},
+		{"pct out of range", func(a *watchArgs) { a.TargetPct = 150 }, "target_pct"},
+		{"pct negative", func(a *watchArgs) { a.TargetPct = -5 }, "target_pct"},
+		{"any mode needs a target", func(a *watchArgs) {
+			a.NotifyOn = "any"
+			a.TargetPrice = 0
+		}, "target_price"},
+		{"condition over cap", func(a *watchArgs) {
+			a.Condition = strings.Repeat("x", 501)
+		}, "condition"},
 	} {
 		a := base
 		tc.mut(&a)
@@ -87,6 +101,65 @@ func TestWatchAddQueryValidatesCriteria(t *testing.T) {
 	a.Criteria = []string{"price_max:50"}
 	if out := d.watchAdd(context.Background(), a); !out.OK {
 		t.Fatalf("valid query add rejected: %s", out.Error)
+	}
+}
+
+// Restock-only and pct-only watches need no absolute target — the
+// trigger set is what matters, not a price field (issues #93/#94).
+func TestWatchAddTriggerShapes(t *testing.T) {
+	d := watchDeps()
+	st := d.watchStore.(*fakeWatchStore)
+
+	// Pure restock: no price target at all.
+	a := watchArgs{Action: "add", Kind: "offer", URL: "http://192.0.2.10/p",
+		Currency: "USD", NotifyOn: "restock"}
+	if out := d.watchAdd(context.Background(), a); !out.OK {
+		t.Fatalf("restock-only add rejected: %s", out.Error)
+	}
+	if st.created.NotifyOn != watch.NotifyRestock || st.created.TargetPriceMinor != nil {
+		t.Errorf("restock watch: notify_on=%q target=%v", st.created.NotifyOn, st.created.TargetPriceMinor)
+	}
+
+	// Pure pct: 20% drop from first observed price.
+	a = watchArgs{Action: "add", Kind: "offer", URL: "http://192.0.2.10/p",
+		Currency: "USD", TargetPct: 20}
+	if out := d.watchAdd(context.Background(), a); !out.OK {
+		t.Fatalf("pct-only add rejected: %s", out.Error)
+	}
+	if st.created.TargetPct == nil || *st.created.TargetPct != 20 {
+		t.Errorf("pct watch: target_pct=%v", st.created.TargetPct)
+	}
+
+	// Combined: restock + absolute target under "any".
+	a = watchArgs{Action: "add", Kind: "offer", URL: "http://192.0.2.10/p",
+		Currency: "USD", NotifyOn: "any", TargetPrice: 100,
+		Condition: "sold by the brand store"}
+	if out := d.watchAdd(context.Background(), a); !out.OK {
+		t.Fatalf("any+condition add rejected: %s", out.Error)
+	}
+	if st.created.NotifyOn != watch.NotifyAny || st.created.ConditionText == "" {
+		t.Errorf("any watch: notify_on=%q condition=%q", st.created.NotifyOn, st.created.ConditionText)
+	}
+}
+
+// Restock on a query watch is rejected: the cheapest offer changes
+// between checks, and a cross-listing availability flip would report a
+// false restock (Devin Review #101). Query watches take price triggers.
+func TestWatchAddQueryRejectsRestock(t *testing.T) {
+	d := watchDeps()
+	for _, mode := range []string{"restock", "any"} {
+		a := watchArgs{Action: "add", Kind: "query", Query: "jbl speaker",
+			Currency: "USD", NotifyOn: mode, TargetPrice: 30}
+		out := d.watchAdd(context.Background(), a)
+		if out.OK {
+			t.Errorf("query+notify_on=%s accepted — restock needs a stable listing", mode)
+		}
+	}
+	// Price-mode query watch still fine.
+	a := watchArgs{Action: "add", Kind: "query", Query: "jbl speaker",
+		Currency: "USD", NotifyOn: "price", TargetPrice: 30}
+	if out := d.watchAdd(context.Background(), a); !out.OK {
+		t.Fatalf("price-mode query add rejected: %s", out.Error)
 	}
 }
 

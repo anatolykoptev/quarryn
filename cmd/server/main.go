@@ -102,6 +102,7 @@ func newWatcher(s *search.Searcher, pgdb *postgres.DB, cfg config.Config, initEr
 		Store:       st,
 		Observer:    watch.NewSearcherObserver(s),
 		Notify:      watch.NewAlertmanagerNotifier(cfg.WatchNotifyURL),
+		Evaluator:   s, // nil-jeff degrade: condition watches fail closed
 		Tick:        cfg.WatchTick,
 		MaxPerTick:  cfg.WatchMaxPerTick,
 		OfferBudget: 2 * time.Minute,
