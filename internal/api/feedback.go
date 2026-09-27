@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anatolykoptev/go-product-search/internal/postgres"
+	"github.com/anatolykoptev/quarryn/internal/postgres"
 )
 
 // feedback field caps bound the log line a single call can emit — feedback

@@ -3,7 +3,7 @@ package match
 import (
 	"unicode/utf8"
 
-	"github.com/anatolykoptev/go-product-search/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/extract"
 )
 
 // Per-field caps on the jeff-visible state (ADR-11). The caps bound what

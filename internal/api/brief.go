@@ -1,10 +1,10 @@
 package api
 
 import (
-	"github.com/anatolykoptev/go-product-search/internal/match"
-	"github.com/anatolykoptev/go-product-search/internal/rank"
-	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
-	"github.com/anatolykoptev/go-product-search/internal/trust"
+	"github.com/anatolykoptev/quarryn/internal/match"
+	"github.com/anatolykoptev/quarryn/internal/rank"
+	pssources "github.com/anatolykoptev/quarryn/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/trust"
 )
 
 // Code composes the brief, never the model (ADR-3's judge decides fit;

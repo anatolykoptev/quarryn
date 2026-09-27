@@ -3,8 +3,8 @@ package watch
 import (
 	"context"
 
-	"github.com/anatolykoptev/go-product-search/internal/extract"
-	"github.com/anatolykoptev/go-product-search/internal/search"
+	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/search"
 )
 
 // Observer turns a Watch into an Observation by re-fetching through the

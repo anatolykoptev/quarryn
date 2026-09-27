@@ -1,4 +1,4 @@
-// Package rank is the final ranking stage (P5) of go-product-search: it
+// Package rank is the final ranking stage (P5) of quarryn: it
 // fuses the per-candidate signals the earlier stages produced — funnel
 // consensus score, deterministic deal signals (ADR-17) and jeff noul
 // verdicts — into one score via go-kit/rerank LinearMinMax, then emits the
@@ -29,7 +29,7 @@ import (
 
 	"github.com/anatolykoptev/go-kit/rerank"
 	"github.com/anatolykoptev/go-kit/score"
-	"github.com/anatolykoptev/go-product-search/internal/match"
+	"github.com/anatolykoptev/quarryn/internal/match"
 )
 
 // Deal-signal sub-weights (ADR-17). They renormalize over the signals a

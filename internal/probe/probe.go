@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-kit/wowa"
-	"github.com/anatolykoptev/go-product-search/internal/config"
-	"github.com/anatolykoptev/go-product-search/internal/extract"
-	"github.com/anatolykoptev/go-product-search/internal/match"
-	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/config"
+	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/match"
+	pssources "github.com/anatolykoptev/quarryn/internal/sources"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -57,10 +57,10 @@ const (
 var injectionPage []byte
 
 // probeTotal counts probe runs by probe and result — the
-// prodsearch_probe_total{probe,result} acceptance signal.
+// quarryn_probe_total{probe,result} acceptance signal.
 var probeTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
-		Namespace: "prodsearch",
+		Namespace: "quarryn",
 		Name:      "probe_total",
 		Help:      "Acceptance probe outcomes per probe.",
 	},
@@ -130,7 +130,7 @@ func NewStandalone(cfg config.Config) *Runner {
 }
 
 // Run executes all probes and returns the structured report. Every probe
-// outcome is counted on prodsearch_probe_total and logged; the overall
+// outcome is counted on quarryn_probe_total and logged; the overall
 // Pass is the AND of the set.
 func (r *Runner) Run(ctx context.Context) Report {
 	rep := Report{

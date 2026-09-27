@@ -1,4 +1,4 @@
-// Package match is the jeff decision stage (P4) of go-product-search:
+// Package match is the jeff decision stage (P4) of quarryn:
 // it turns extraction-enriched candidates into judged candidates.
 //
 // Design (ADRs 3/4/5/11/12):
@@ -28,7 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anatolykoptev/go-product-search/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/extract"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -47,7 +47,7 @@ var (
 	// ok | degraded (some candidates lost verdicts to jeff failure) | empty.
 	matchRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prodsearch",
+			Namespace: "quarryn",
 			Name:      "match_requests_total",
 			Help:      "jeff match calls partitioned by outcome.",
 		},
@@ -57,7 +57,7 @@ var (
 	// rejected, by bounded reason label.
 	prefilterExcluded = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prodsearch",
+			Namespace: "quarryn",
 			Name:      "prefilter_excluded_total",
 			Help:      "Candidates excluded by deterministic prefilter constraints.",
 		},
@@ -69,7 +69,7 @@ var (
 	// data — they mark the candidate but never reach this counter.
 	jeffDegradedTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prodsearch",
+			Namespace: "quarryn",
 			Name:      "jeff_degraded_total",
 			Help:      "Candidates downgraded to deterministic-only ranking by jeff failure.",
 		},
@@ -80,7 +80,7 @@ var (
 	// The label is the criterion ID (c0..c63), a bounded vocabulary.
 	jeffNoulProbability = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "prodsearch",
+			Namespace: "quarryn",
 			Name:      "jeff_noul_probability",
 			Help:      "Noul probability per criterion ID.",
 			Buckets:   prometheus.LinearBuckets(0.05, 0.05, 19),

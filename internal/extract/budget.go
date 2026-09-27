@@ -13,7 +13,7 @@ var (
 	// the spend the daily cap bounds.
 	llmExtractCallsTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "prodsearch",
+			Namespace: "quarryn",
 			Name:      "llm_extract_calls_total",
 			Help:      "wowa /api/v1/extract LLM fallback calls placed.",
 		},
@@ -22,7 +22,7 @@ var (
 	// cap — they continue unenriched, so the counter is the only loud part.
 	llmBudgetExhaustedTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "prodsearch",
+			Namespace: "quarryn",
 			Name:      "llm_budget_exhausted_total",
 			Help:      "Candidates that skipped the LLM fallback because the daily spend cap was reached.",
 		},

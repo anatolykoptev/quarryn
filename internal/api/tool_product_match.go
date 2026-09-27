@@ -4,7 +4,7 @@ import (
 	"context"
 
 	mcpserver "github.com/anatolykoptev/go-mcpserver"
-	"github.com/anatolykoptev/go-product-search/internal/rank"
+	"github.com/anatolykoptev/quarryn/internal/rank"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

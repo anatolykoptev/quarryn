@@ -12,10 +12,10 @@ import (
 	enginesources "github.com/anatolykoptev/go-engine/sources"
 	"github.com/anatolykoptev/go-kit/httputil"
 	mcpserver "github.com/anatolykoptev/go-mcpserver"
-	"github.com/anatolykoptev/go-product-search/internal/match"
-	"github.com/anatolykoptev/go-product-search/internal/money"
-	"github.com/anatolykoptev/go-product-search/internal/sources"
-	"github.com/anatolykoptev/go-product-search/internal/watch"
+	"github.com/anatolykoptev/quarryn/internal/match"
+	"github.com/anatolykoptev/quarryn/internal/money"
+	"github.com/anatolykoptev/quarryn/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/watch"
 )
 
 // product_watch is the stateful watch surface (issue #53). CRUD + a
@@ -277,7 +277,7 @@ func registerProductWatch(srv *mcp.Server, d deps) {
 		Name: "product_watch",
 		Description: "Price watches (issue #53): kind=offer re-fetches one pinned " +
 			"URL; kind=query re-runs the search for the cheapest matching offer. " +
-			"Notifies via dozor on a target-price hit — at-least-once ledger, " +
+			"Notifies via an Alertmanager webhook on a target-price hit — at-least-once ledger, " +
 			"1%-of-target dedupe, bounded lifetime (ttl_hours). check_now runs " +
 			"one synchronous check. Notification only — never a purchase.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args watchArgs) (*mcp.CallToolResult, error) {

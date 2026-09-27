@@ -3,7 +3,7 @@ package extract
 import (
 	"math"
 
-	"github.com/anatolykoptev/go-product-search/internal/money"
+	"github.com/anatolykoptev/quarryn/internal/money"
 	"net/url"
 	"strings"
 	"unicode/utf8"

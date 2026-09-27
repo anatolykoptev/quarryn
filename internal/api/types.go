@@ -1,4 +1,4 @@
-// Package api is the MCP tool surface (P5) of go-product-search: it binds
+// Package api is the MCP tool surface (P5) of quarryn: it binds
 // the retained search.Searcher to the product_search / product_match
 // tools and projects every result through the extract.PublicProduct
 // egress allowlist — no seller-identifying text, no Raw provenance blobs,
@@ -7,9 +7,9 @@ package api
 
 import (
 	"github.com/anatolykoptev/go-kit/score"
-	"github.com/anatolykoptev/go-product-search/internal/extract"
-	"github.com/anatolykoptev/go-product-search/internal/rank"
-	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/rank"
+	pssources "github.com/anatolykoptev/quarryn/internal/sources"
 )
 
 // productSearchInput is the product_search tool argument shape.

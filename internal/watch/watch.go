@@ -1,7 +1,7 @@
 // Package watch implements price watches (issue #53, northcinder's
 // watches/checker.ts): a user pins an offer or a query, the checker
 // re-observes it through the existing budgeted fetch path and notifies
-// via the governed dozor webhook on target-price hits.
+// via an Alertmanager webhook on target-price hits.
 //
 // LAW: a check ends in a notification and nothing else — there is no
 // purchase path anywhere in the repo, and this package's only outbound

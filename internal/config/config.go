@@ -1,4 +1,4 @@
-// Package config loads go-product-search configuration from environment
+// Package config loads quarryn configuration from environment
 // variables.
 package config
 
@@ -49,7 +49,7 @@ type Config struct {
 	// ExtractConcurrency bounds parallel candidate enrichment;
 	// ExtractFetchTimeoutSecs is the per-fetch wire timeout;
 	// ExtractCandidateTimeout bounds the whole per-candidate chain;
-	// ExtractCacheMaxItems bounds the L1 cache; ProdsearchRedisDB selects
+	// ExtractCacheMaxItems bounds the L1 cache; QuarrynRedisDB selects
 	// the dedicated Redis DB index for the L2 extraction cache;
 	// ExtractLLMDailyMax (P6, ADR-12) caps /extract calls per UTC day —
 	// process-local, resets on restart.
@@ -60,7 +60,7 @@ type Config struct {
 	ExtractFetchTimeoutSecs int
 	ExtractCandidateTimeout time.Duration
 	ExtractCacheMaxItems    int
-	ProdsearchRedisDB       int
+	QuarrynRedisDB          int
 	ExtractLLMDailyMax      int
 
 	// Resilience bounds on the wowa page-fetch path (P6):
@@ -83,7 +83,7 @@ type Config struct {
 	// JSONL file; set → Postgres is the primary sink with the file as
 	// write-failure fallback.
 	DatabaseURL string
-	// WatchNotifyURL is the governed notification endpoint (dozor
+	// WatchNotifyURL is the notification endpoint (an Alertmanager v4
 	// alertmanager webhook); WatchTick/WatchMaxPerTick bound the checker.
 	WatchNotifyURL  string
 	WatchTick       time.Duration
@@ -112,7 +112,7 @@ func Load() Config {
 		Port:              env.Str("PORT", "8922"),
 		PromPort:          env.Str("PROM_PORT", "9922"),
 		WowaURL:           env.Str("WOWA_URL", "http://127.0.0.1:8906"),
-		JeffURL:           env.Str("JEFF_URL", "https://jeff.krolik.tools"),
+		JeffURL:           env.Str("JEFF_URL", ""),
 		JeffToken:         env.Str("JEFF_TOKEN", ""),
 		InternalSecret:    env.Str("INTERNAL_SERVICE_SECRET", ""),
 		TrustAllow:        env.List("TRUST_ALLOW_DOMAINS", ""),
@@ -130,14 +130,14 @@ func Load() Config {
 		ExtractFetchTimeoutSecs: env.Int("EXTRACT_FETCH_TIMEOUT_SECS", 25),
 		ExtractCandidateTimeout: env.Duration("EXTRACT_CANDIDATE_TIMEOUT", 45*time.Second),
 		ExtractCacheMaxItems:    env.Int("EXTRACT_CACHE_ITEMS", 2000),
-		ProdsearchRedisDB:       env.Int("PRODSEARCH_REDIS_DB", 7),
+		QuarrynRedisDB:          env.Int("QUARRYN_REDIS_DB", 7),
 		ExtractLLMDailyMax:      env.Int("EXTRACT_LLM_DAILY_MAX", 50),
 		// P6 page-path bounds. DOMAIN_MIN_INTERVAL_MS=0 disables pacing.
 		MaxPagesPerSearch: env.Int("MAX_PAGES_PER_SEARCH", 30),
 		DomainMinInterval: time.Duration(env.Int("DOMAIN_MIN_INTERVAL_MS", 2000)) * time.Millisecond,
-		FeedbackFile:      env.Str("FEEDBACK_FILE", "/var/lib/go-product-search/feedback.jsonl"),
+		FeedbackFile:      env.Str("FEEDBACK_FILE", "/var/lib/quarryn/feedback.jsonl"),
 		DatabaseURL:       env.Str("DATABASE_URL", ""),
-		WatchNotifyURL:    env.Str("WATCH_NOTIFY_URL", "http://dozor:8765/webhook/alertmanager"),
+		WatchNotifyURL:    env.Str("WATCH_NOTIFY_URL", ""),
 		WatchTick:         env.Duration("WATCH_TICK", 15*time.Minute),
 		WatchMaxPerTick:   env.Int("WATCH_MAX_PER_TICK", 10),
 		ToolTimeout:       env.Duration("TOOL_TIMEOUT", 90*time.Second),

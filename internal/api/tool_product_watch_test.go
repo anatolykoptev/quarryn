@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anatolykoptev/go-product-search/internal/watch"
+	"github.com/anatolykoptev/quarryn/internal/watch"
 )
 
 // fakeWatchStore satisfies watchStorer for validation tests — pg itself

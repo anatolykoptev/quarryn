@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"github.com/anatolykoptev/go-product-search/internal/config"
-	"github.com/anatolykoptev/go-product-search/internal/probe"
-	"github.com/anatolykoptev/go-product-search/internal/rank"
-	"github.com/anatolykoptev/go-product-search/internal/search"
-	"github.com/anatolykoptev/go-product-search/internal/trust"
-	"github.com/anatolykoptev/go-product-search/internal/watch"
+	"github.com/anatolykoptev/quarryn/internal/config"
+	"github.com/anatolykoptev/quarryn/internal/probe"
+	"github.com/anatolykoptev/quarryn/internal/rank"
+	"github.com/anatolykoptev/quarryn/internal/search"
+	"github.com/anatolykoptev/quarryn/internal/trust"
+	"github.com/anatolykoptev/quarryn/internal/watch"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

@@ -13,7 +13,7 @@ const productProbeDesc = "Run the acceptance probes against the live configured 
 	"listing carrying an embedded 'ignore previous instructions' payload through the real " +
 	"extract+match path, passing only if the injected text never reaches the jeff state and " +
 	"the candidate is not auto-passed. Read-only toward third parties; safe to run any time. " +
-	"Each run increments prodsearch_probe_total{probe,result}."
+	"Each run increments quarryn_probe_total{probe,result}."
 
 // productProbeInput takes no arguments — probes are fixed canned checks.
 type productProbeInput struct{}

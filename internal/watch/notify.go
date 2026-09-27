@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anatolykoptev/go-product-search/internal/money"
+	"github.com/anatolykoptev/quarryn/internal/money"
 )
 
 // Notifier is the single outbound boundary of this package — LAW: a check
@@ -20,17 +20,16 @@ type Notifier interface {
 	Notify(ctx context.Context, w Watch, obs Observation) (retryAfter time.Duration, err error)
 }
 
-// DozorNotifier ships alerts through the governed dozor alertmanager v4
-// webhook — the same path fleet scripts use for Telegram delivery.
-type DozorNotifier struct {
+// AlertmanagerNotifier ships alerts through an Alertmanager v4 webhook endpoint.
+type AlertmanagerNotifier struct {
 	URL    string
 	Client *http.Client
 	Now    func() time.Time // test seam
 }
 
-// NewDozorNotifier builds the fleet-default notifier.
-func NewDozorNotifier(url string) *DozorNotifier {
-	return &DozorNotifier{URL: url, Client: &http.Client{Timeout: 15 * time.Second}, Now: time.Now}
+// NewAlertmanagerNotifier builds the notifier.
+func NewAlertmanagerNotifier(url string) *AlertmanagerNotifier {
+	return &AlertmanagerNotifier{URL: url, Client: &http.Client{Timeout: 15 * time.Second}, Now: time.Now}
 }
 
 type amAlert struct {
@@ -46,10 +45,9 @@ type amPayload struct {
 	Alerts  []amAlert `json:"alerts"`
 }
 
-// Notify posts an alertmanager v4 payload. severity=warning is the level
-// dozor ships to Telegram; the alertname/watch labels give alertmanager's
+// Notify posts an alertmanager v4 payload. severity=warning is a portable alert level; the alertname/watch labels give alertmanager's
 // grouping a stable identity.
-func (n *DozorNotifier) Notify(ctx context.Context, w Watch, obs Observation) (time.Duration, error) {
+func (n *AlertmanagerNotifier) Notify(ctx context.Context, w Watch, obs Observation) (time.Duration, error) {
 	label := w.Label
 	if label == "" {
 		label = w.Query
@@ -73,7 +71,7 @@ func (n *DozorNotifier) Notify(ctx context.Context, w Watch, obs Observation) (t
 			Labels: map[string]string{
 				"alertname": "PriceWatchHit",
 				"severity":  "warning",
-				"service":   "go-product-search",
+				"service":   "quarryn",
 				"watch":     strconv.FormatInt(w.ID, 10),
 			},
 			Annotations: map[string]string{"summary": summary, "description": desc},
@@ -94,7 +92,7 @@ func (n *DozorNotifier) Notify(ctx context.Context, w Watch, obs Observation) (t
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
-		return retryAfter(resp), fmt.Errorf("dozor webhook: HTTP %d", resp.StatusCode)
+		return retryAfter(resp), fmt.Errorf("alertmanager webhook: HTTP %d", resp.StatusCode)
 	}
 	return 0, nil
 }

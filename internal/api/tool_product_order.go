@@ -12,8 +12,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcpserver "github.com/anatolykoptev/go-mcpserver"
-	"github.com/anatolykoptev/go-product-search/internal/money"
-	"github.com/anatolykoptev/go-product-search/internal/orders"
+	"github.com/anatolykoptev/quarryn/internal/money"
+	"github.com/anatolykoptev/quarryn/internal/orders"
 )
 
 // product_order is the order-tracking surface (issue #57): emails land

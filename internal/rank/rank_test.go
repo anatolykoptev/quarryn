@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/anatolykoptev/go-kit/score"
-	"github.com/anatolykoptev/go-product-search/internal/extract"
-	"github.com/anatolykoptev/go-product-search/internal/match"
+	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/match"
 )
 
 var defaultWeights = Weights{Funnel: 0.3, Deal: 0.2, Jeff: 0.5}

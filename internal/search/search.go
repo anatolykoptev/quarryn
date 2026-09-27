@@ -14,11 +14,11 @@ import (
 	"github.com/anatolykoptev/go-kit/cache"
 	"github.com/anatolykoptev/go-kit/httputil"
 	"github.com/anatolykoptev/go-kit/wowa"
-	"github.com/anatolykoptev/go-product-search/internal/config"
-	"github.com/anatolykoptev/go-product-search/internal/extract"
-	"github.com/anatolykoptev/go-product-search/internal/match"
-	"github.com/anatolykoptev/go-product-search/internal/probe"
-	pssources "github.com/anatolykoptev/go-product-search/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/config"
+	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/match"
+	"github.com/anatolykoptev/quarryn/internal/probe"
+	pssources "github.com/anatolykoptev/quarryn/internal/sources"
 )
 
 // Searcher is the product-search entrypoint: query → sourced candidates →
@@ -128,14 +128,14 @@ func newPipeline(cfg config.Config, gate *pssources.FetchGate, llm extract.LLMCa
 }
 
 // newExtractCache builds the ADR-7 extraction cache: L1 S3-FIFO always,
-// Redis L2 on the dedicated PRODSEARCH_REDIS_DB when REDIS_URL is set.
-// Keys carry the "prodsearch:" prefix + extractor version; TTL is 24h and
+// Redis L2 on the dedicated QUARRYN_REDIS_DB when REDIS_URL is set.
+// Keys carry the "quarryn:" prefix + extractor version; TTL is 24h and
 // L1 is item- and weight-bounded (64MB).
 func newExtractCache(cfg config.Config) *cache.Cache {
 	return cache.New(cache.Config{
 		RedisURL:   cfg.RedisURL,
-		RedisDB:    cfg.ProdsearchRedisDB,
-		Prefix:     "prodsearch:",
+		RedisDB:    cfg.QuarrynRedisDB,
+		Prefix:     "quarryn:",
 		L1MaxItems: cfg.ExtractCacheMaxItems,
 		L1TTL:      24 * time.Hour,
 		L2TTL:      24 * time.Hour,

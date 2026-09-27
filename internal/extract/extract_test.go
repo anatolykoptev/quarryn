@@ -12,7 +12,7 @@ import (
 
 	"github.com/anatolykoptev/go-kit/cache"
 	"github.com/anatolykoptev/go-kit/wowa"
-	"github.com/anatolykoptev/go-product-search/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/sources"
 )
 
 // stubFetcher is a hand-rolled Fetcher counting calls.

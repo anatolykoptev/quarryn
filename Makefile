@@ -1,5 +1,5 @@
-BINARY = bin/go-product-search
-SERVICE = go-product-search
+BINARY = bin/quarryn
+SERVICE = quarryn
 
 .PHONY: preflight build test lint vendor clean
 

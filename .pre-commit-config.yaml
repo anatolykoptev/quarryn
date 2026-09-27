@@ -4,10 +4,10 @@ repos:
       - id: golangci-lint-full
         name: golangci-lint-full
         language: system
-        # Uses the pinned canonical binary (~/.local/bin/golangci-lint v2.12.2).
-        # GOWORK=off is required: krolik has a go.work that makes golangci-lint
+        # Uses golangci-lint from PATH (pin v2.12.2 — see .github/workflows).
+        # GOWORK=off guards against a stray go.work in a parent dir making
         # typechecking fail with "directory prefix . does not contain modules
-        # listed in go.work" unless the workspace is explicitly disabled.
-        entry: env GOWORK=off /home/krolik/.local/bin/golangci-lint run
+        # listed in go.work".
+        entry: env GOWORK=off golangci-lint run
         types: [go]
         pass_filenames: false

@@ -11,8 +11,8 @@ import (
 
 	"github.com/anatolykoptev/go-kit/jeff"
 	"github.com/anatolykoptev/go-kit/wowa"
-	"github.com/anatolykoptev/go-product-search/internal/extract"
-	"github.com/anatolykoptev/go-product-search/internal/match"
+	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/match"
 )
 
 // fakeFetch is the probe-test wowa stand-in.

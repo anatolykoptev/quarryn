@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-kit/wowa"
-	"github.com/anatolykoptev/go-product-search/internal/sources"
+	"github.com/anatolykoptev/quarryn/internal/sources"
 )
 
 // stubRenderer is a hand-rolled Renderer counting calls.
