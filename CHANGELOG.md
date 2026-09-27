@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.14.0](https://github.com/anatolykoptev/go-product-search/compare/v1.13.0...v1.14.0) (2026-09-27)
+
+
+### Added
+
+* Postgres feedback sink on the fleet-shared instance ([#77](https://github.com/anatolykoptev/go-product-search/issues/77)) ([9f99b47](https://github.com/anatolykoptev/go-product-search/commit/9f99b47a3f169140c3d6d66c8548f7fdd224983b))
+* stable offer-ID codec for same-listing re-resolution ([#75](https://github.com/anatolykoptev/go-product-search/issues/75)) ([0b283ac](https://github.com/anatolykoptev/go-product-search/commit/0b283ac39f22e51ca84dd6dde95b2ba9608815c4))
+
 ## [1.13.0](https://github.com/anatolykoptev/go-product-search/compare/v1.12.0...v1.13.0) (2026-09-27)
 
 
