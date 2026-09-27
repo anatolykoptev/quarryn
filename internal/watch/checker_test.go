@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anatolykoptev/quarryn/internal/extract"
 	"github.com/anatolykoptev/quarryn/internal/money"
 )
 
@@ -37,19 +38,30 @@ type fakeNotifier struct {
 	err        error
 }
 
-func (f *fakeNotifier) Notify(context.Context, Watch, Observation) (time.Duration, error) {
+func (f *fakeNotifier) Notify(context.Context, Watch, Observation, string) (time.Duration, error) {
 	f.calls++
 	return f.retryAfter, f.err
 }
 
+type fakeEvaluator struct {
+	pass bool
+	err  error
+}
+
+func (f fakeEvaluator) EvaluateCondition(context.Context, string, extract.Product) (bool, error) {
+	return f.pass, f.err
+}
+
 func baseWatch() Watch {
+	target := int64(10_000) // $100.00
 	return Watch{
 		ID:               1,
 		Kind:             KindOffer,
 		URL:              "https://shop.example/p/1",
 		OfferID:          "shopify|shop.example|1",
 		NativeID:         true,
-		TargetPriceMinor: 10_000, // $100.00
+		TargetPriceMinor: &target,
+		NotifyOn:         NotifyPrice,
 		Currency:         "USD",
 		Interval:         time.Hour,
 		Status:           StatusActive,

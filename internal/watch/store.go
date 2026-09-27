@@ -37,12 +37,14 @@ func (s *Store) Create(ctx context.Context, w *Watch) error {
 	err = s.pool.QueryRow(ctx, `
 		INSERT INTO watches (kind, offer_id, native_id, url, label, query,
 			criteria, target_price_minor, currency, interval_minutes,
-			expires_at, next_check_after)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
+			expires_at, next_check_after, notify_on, target_pct,
+			condition_text)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(),$12,$13,$14)
 		RETURNING id, created_at`,
 		w.Kind, w.OfferID, w.NativeID, w.URL, w.Label, w.Query,
 		crit, w.TargetPriceMinor, w.Currency,
-		int(w.Interval.Minutes()), w.ExpiresAt).
+		int(w.Interval.Minutes()), w.ExpiresAt,
+		w.NotifyOn, w.TargetPct, w.ConditionText).
 		Scan(&w.ID, &w.CreatedAt)
 	return err
 }
@@ -54,7 +56,8 @@ func (s *Store) List(ctx context.Context, includeInactive bool) ([]Watch, error)
 		interval_minutes, status, last_checked_at, next_check_after,
 		last_price_minor, last_availability, consec_failures,
 		notify_pending, last_notify_attempt_at, notified_price_minor,
-		notified_at, notify_count
+		notified_at, notify_count, notify_on, target_pct,
+		baseline_price_minor, condition_text
 		FROM watches`
 	if !includeInactive {
 		q += ` WHERE status = 'active'`
@@ -85,7 +88,8 @@ func (s *Store) Get(ctx context.Context, id int64) (Watch, error) {
 			interval_minutes, status, last_checked_at, next_check_after,
 			last_price_minor, last_availability, consec_failures,
 			notify_pending, last_notify_attempt_at, notified_price_minor,
-			notified_at, notify_count
+			notified_at, notify_count, notify_on, target_pct,
+			baseline_price_minor, condition_text
 		FROM watches WHERE id=$1`, id)
 	return scanWatch(row)
 }
@@ -106,7 +110,8 @@ func (s *Store) Due(ctx context.Context, limit int, now time.Time) ([]Watch, err
 			interval_minutes, status, last_checked_at, next_check_after,
 			last_price_minor, last_availability, consec_failures,
 			notify_pending, last_notify_attempt_at, notified_price_minor,
-			notified_at, notify_count
+			notified_at, notify_count, notify_on, target_pct,
+			baseline_price_minor, condition_text
 		FROM watches
 		WHERE status='active' AND expires_at > $1 AND next_check_after <= $1
 		ORDER BY next_check_after
@@ -138,7 +143,8 @@ func scanWatch(r rowScanner) (Watch, error) {
 		&w.LastCheckedAt, &w.NextCheckAfter, &w.LastPriceMinor,
 		&w.LastAvailability, &w.ConsecFailures, &w.NotifyPending,
 		&w.LastNotifyAttemptAt, &w.NotifiedPriceMinor, &w.NotifiedAt,
-		&w.NotifyCount)
+		&w.NotifyCount, &w.NotifyOn, &w.TargetPct, &w.BaselineMinor,
+		&w.ConditionText)
 	if err != nil {
 		return w, err
 	}
@@ -177,14 +183,48 @@ func (s *Store) Record(ctx context.Context, w *Watch, obs Observation) error {
 			last_price_minor=$5, last_availability=$6,
 			consec_failures=$7, notify_pending=$8,
 			last_notify_attempt_at=$9, notified_price_minor=$10,
-			notified_at=$11, notify_count=$12
+			notified_at=$11, notify_count=$12,
+			baseline_price_minor=$13
 		WHERE id=$1`,
 		w.ID, w.Status, w.LastCheckedAt, w.NextCheckAfter,
 		w.LastPriceMinor, w.LastAvailability, w.ConsecFailures,
 		w.NotifyPending, w.LastNotifyAttemptAt, w.NotifiedPriceMinor,
-		w.NotifiedAt, w.NotifyCount)
+		w.NotifiedAt, w.NotifyCount, w.BaselineMinor)
 	if err != nil {
 		return fmt.Errorf("update watch: %w", err)
 	}
 	return tx.Commit(ctx)
+}
+
+// History returns a watch's recorded observations newest-first — the
+// ok rows double as the price/availability history (issue #95). Failed
+// outcomes are included: "extract_empty" gaps are part of the honest
+// record (a listing that disappeared, then came back).
+func (s *Store) History(ctx context.Context, id int64, limit int) ([]Observation, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT ts, price_minor, currency, availability, offer_url,
+			offer_id, outcome, detail
+		FROM watch_observations
+		WHERE watch_id = $1
+		ORDER BY ts DESC
+		LIMIT $2`, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Observation
+	for rows.Next() {
+		var o Observation
+		if err := rows.Scan(&o.TS, &o.PriceMinor, &o.Currency,
+			&o.Availability, &o.OfferURL, &o.OfferID, &o.Outcome,
+			&o.Detail); err != nil {
+			return nil, err
+		}
+		o.WatchID = id
+		out = append(out, o)
+	}
+	return out, rows.Err()
 }

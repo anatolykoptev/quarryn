@@ -77,7 +77,7 @@ watches and re-probes pin to.
 |---|---|
 | `product_search` | Full pipeline: adapters → extract → match → rank |
 | `product_match` | Judge one caller-supplied product URL |
-| `product_watch` | `add\|list\|cancel\|check_now` price watches |
+| `product_watch` | `add\|list\|get\|cancel\|check_now` price & restock watches — `notify_on`, `target_pct`, optional LLM `condition` gate, history |
 | `product_order` | `ingest_eml\|list\|get\|mark` order graph |
 | `product_feedback` | Outcome record `{request_id, picked_url, verdict}` |
 | `product_probe` | Live acceptance probes |

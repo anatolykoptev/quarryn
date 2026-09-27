@@ -3,11 +3,14 @@ package match
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/anatolykoptev/go-kit/jeff"
+
+	"github.com/anatolykoptev/quarryn/internal/extract"
 )
 
 // Defaults for the jeff call budget (ADR-12). Sized against the observed
@@ -95,6 +98,32 @@ func newMatcher(cfg Config) *Matcher {
 		m.callTimeout = defaultJeffTimeout
 	}
 	return m
+}
+
+// EvaluateCondition answers one free-form condition against a single
+// product — the watch checker's subjective trigger gate (issue #96).
+// The product crosses as the same CandidateState the match funnel uses
+// (allow-listed fields only); the verdict is a noul pass at m.min.
+// A nil jeff client or a bad/missing answer returns an error — the
+// caller fails closed.
+func (m *Matcher) EvaluateCondition(ctx context.Context, condition string, p extract.Product) (bool, error) {
+	if m.jeff == nil {
+		return false, errors.New("jeff unconfigured")
+	}
+	cctx, cancel := m.callDeadline(ctx)
+	defer cancel()
+	resp, err := m.jeff.Ask(cctx, jeff.Request{
+		State:     NewCandidateState(p.ProductPublic()),
+		Questions: map[string]jeff.Question{"cond": jeff.NoulQuestion(condition)},
+	})
+	if err != nil {
+		return false, err
+	}
+	a, ok := resp.Answers["cond"]
+	if !ok || !(a.Noul >= 0 && a.Noul <= 1) {
+		return false, errors.New("jeff returned no usable answer")
+	}
+	return a.Noul >= m.min, nil
 }
 
 // callDeadline applies the per-call bound (min of the caller ctx deadline

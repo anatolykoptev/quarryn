@@ -14,10 +14,11 @@ import (
 )
 
 // Notifier is the single outbound boundary of this package — LAW: a check
-// ends in a notification and nothing else. retryAfter comes back from the
-// notifier (429/Retry-After) and lands on next_check_after.
+// ends in a notification and nothing else. kind names the firing trigger
+// ("price"|"restock", "" on pending retries); retryAfter comes back from
+// the notifier (429/Retry-After) and lands on next_check_after.
 type Notifier interface {
-	Notify(ctx context.Context, w Watch, obs Observation) (retryAfter time.Duration, err error)
+	Notify(ctx context.Context, w Watch, obs Observation, kind string) (retryAfter time.Duration, err error)
 }
 
 // AlertmanagerNotifier ships alerts through an Alertmanager v4 webhook endpoint.
@@ -45,9 +46,31 @@ type amPayload struct {
 	Alerts  []amAlert `json:"alerts"`
 }
 
+// alertSummary renders the human-facing line by trigger kind.
+func alertSummary(w Watch, obs Observation, kind, label string) string {
+	switch {
+	case kind == "restock":
+		s := "restock: " + label + " is " + obs.Availability
+		if obs.PriceMinor != nil {
+			s += " at " + money.Format(*obs.PriceMinor, obs.Currency)
+		}
+		return s
+	case obs.PriceMinor != nil:
+		s := fmt.Sprintf("price hit: %s — %s", label,
+			money.Format(*obs.PriceMinor, obs.Currency))
+		if tgt := w.effectiveTarget(); tgt > 0 {
+			s += fmt.Sprintf(" (target %s)", money.Format(tgt, w.Currency))
+		}
+		return s
+	default:
+		return "watch fired: " + label
+	}
+}
+
 // Notify posts an alertmanager v4 payload. severity=warning is a portable alert level; the alertname/watch labels give alertmanager's
-// grouping a stable identity.
-func (n *AlertmanagerNotifier) Notify(ctx context.Context, w Watch, obs Observation) (time.Duration, error) {
+// grouping a stable identity. The trigger label splits price hits from
+// restocks; the summary text follows the firing kind.
+func (n *AlertmanagerNotifier) Notify(ctx context.Context, w Watch, obs Observation, kind string) (time.Duration, error) {
 	label := w.Label
 	if label == "" {
 		label = w.Query
@@ -55,13 +78,14 @@ func (n *AlertmanagerNotifier) Notify(ctx context.Context, w Watch, obs Observat
 	if label == "" {
 		label = w.URL
 	}
-	summary := fmt.Sprintf("price hit: %s — %s (target %s)",
-		label, money.Format(*obs.PriceMinor, obs.Currency),
-		money.Format(w.TargetPriceMinor, w.Currency))
+	summary := alertSummary(w, obs, kind, label)
 	desc := obs.OfferURL
 	if w.NotifiedPriceMinor != nil {
 		desc = fmt.Sprintf("%s\nprevious notify at %s", desc,
 			money.Format(*w.NotifiedPriceMinor, w.Currency))
+	}
+	if kind == "" {
+		kind = "unknown" // pending retry: the trigger that fired has rolled over
 	}
 	body, err := json.Marshal(amPayload{
 		Version: "4",
@@ -73,6 +97,7 @@ func (n *AlertmanagerNotifier) Notify(ctx context.Context, w Watch, obs Observat
 				"severity":  "warning",
 				"service":   "quarryn",
 				"watch":     strconv.FormatInt(w.ID, 10),
+				"trigger":   kind,
 			},
 			Annotations: map[string]string{"summary": summary, "description": desc},
 			StartsAt:    n.Now().UTC().Format(time.RFC3339),
