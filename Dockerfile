@@ -4,8 +4,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 COPY vendor/ vendor/
 COPY . .
-RUN VERSION=$(git describe --tags --always 2>/dev/null || echo "dev") && \
-    CGO_ENABLED=0 go build -mod=vendor -ldflags="-s -w -X main.version=${VERSION}" -o /quarryn ./cmd/server
+RUN VERSION=$(git describe --tags --always 2>/dev/null || true) && \
+    LDEXTRA=""; [ -n "$VERSION" ] && LDEXTRA="-X main.version=${VERSION}"; \
+    CGO_ENABLED=0 go build -mod=vendor -ldflags="-s -w ${LDEXTRA}" -o /quarryn ./cmd/server
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates curl
