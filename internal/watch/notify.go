@@ -71,21 +71,12 @@ func alertSummary(w Watch, obs Observation, kind, label string) string {
 // grouping a stable identity. The trigger label splits price hits from
 // restocks; the summary text follows the firing kind.
 func (n *AlertmanagerNotifier) Notify(ctx context.Context, w Watch, obs Observation, kind string) (time.Duration, error) {
-	label := w.Label
-	if label == "" {
-		label = w.Query
-	}
-	if label == "" {
-		label = w.URL
-	}
+	label := watchLabel(w)
 	summary := alertSummary(w, obs, kind, label)
 	desc := obs.OfferURL
 	if w.NotifiedPriceMinor != nil {
 		desc = fmt.Sprintf("%s\nprevious notify at %s", desc,
 			money.Format(*w.NotifiedPriceMinor, w.Currency))
-	}
-	if kind == "" {
-		kind = "unknown" // pending retry: the trigger that fired has rolled over
 	}
 	body, err := json.Marshal(amPayload{
 		Version: "4",
@@ -97,7 +88,7 @@ func (n *AlertmanagerNotifier) Notify(ctx context.Context, w Watch, obs Observat
 				"severity":  "warning",
 				"service":   "quarryn",
 				"watch":     strconv.FormatInt(w.ID, 10),
-				"trigger":   kind,
+				"trigger":   triggerKind(kind),
 			},
 			Annotations: map[string]string{"summary": summary, "description": desc},
 			StartsAt:    n.Now().UTC().Format(time.RFC3339),
@@ -118,6 +109,101 @@ func (n *AlertmanagerNotifier) Notify(ctx context.Context, w Watch, obs Observat
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return retryAfter(resp), fmt.Errorf("alertmanager webhook: HTTP %d", resp.StatusCode)
+	}
+	return 0, nil
+}
+
+// watchLabel is the human-facing name — label, else query, else URL.
+func watchLabel(w Watch) string {
+	if w.Label != "" {
+		return w.Label
+	}
+	if w.Query != "" {
+		return w.Query
+	}
+	return w.URL
+}
+
+// triggerKind normalizes the empty kind a pending retry can carry.
+func triggerKind(kind string) string {
+	if kind == "" {
+		return "unknown"
+	}
+	return kind
+}
+
+// WebhookNotifier posts a plain JSON body to the configured URL — the
+// standalone-user sink (ntfy/Gotify/custom) that doesn't assume a fleet
+// Alertmanager (issue #99). Same at-least-once semantics: a transport or
+// HTTP>=400 failure leaves the alert pending and the checker retries.
+type WebhookNotifier struct {
+	URL    string
+	Client *http.Client
+	Now    func() time.Time // test seam
+}
+
+// NewWebhookNotifier builds the notifier.
+func NewWebhookNotifier(url string) *WebhookNotifier {
+	return &WebhookNotifier{URL: url, Client: &http.Client{Timeout: 15 * time.Second}, Now: time.Now}
+}
+
+type webhookPayload struct {
+	Event            string `json:"event"` // watch_triggered
+	Trigger          string `json:"trigger"`
+	WatchID          int64  `json:"watch_id"`
+	Kind             string `json:"kind"`
+	Label            string `json:"label,omitempty"`
+	URL              string `json:"url,omitempty"`
+	Query            string `json:"query,omitempty"`
+	OfferID          string `json:"offer_id,omitempty"`
+	PriceMinor       *int64 `json:"price_minor,omitempty"`
+	Currency         string `json:"currency,omitempty"`
+	Availability     string `json:"availability,omitempty"`
+	TargetPriceMinor *int64 `json:"target_price_minor,omitempty"`
+	TargetPct        *int   `json:"target_pct,omitempty"`
+	BaselineMinor    *int64 `json:"baseline_price_minor,omitempty"`
+	ObservedAt       string `json:"observed_at"`
+	Summary          string `json:"summary"`
+}
+
+// Notify posts the flat JSON payload. trigger/observed_at/summary mirror
+// the alertmanager labels+annotations so sinks can route or render
+// without knowing the v4 envelope.
+func (n *WebhookNotifier) Notify(ctx context.Context, w Watch, obs Observation, kind string) (time.Duration, error) {
+	label := watchLabel(w)
+	body, err := json.Marshal(webhookPayload{
+		Event:            "watch_triggered",
+		Trigger:          triggerKind(kind),
+		WatchID:          w.ID,
+		Kind:             string(w.Kind),
+		Label:            label,
+		URL:              w.URL,
+		Query:            w.Query,
+		OfferID:          obs.OfferID,
+		PriceMinor:       obs.PriceMinor,
+		Currency:         obs.Currency,
+		Availability:     obs.Availability,
+		TargetPriceMinor: w.TargetPriceMinor,
+		TargetPct:        w.TargetPct,
+		BaselineMinor:    w.BaselineMinor,
+		ObservedAt:       obs.TS.UTC().Format(time.RFC3339),
+		Summary:          alertSummary(w, obs, kind, label),
+	})
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.URL, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("content-type", "application/json")
+	resp, err := n.Client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		return retryAfter(resp), fmt.Errorf("webhook notify: HTTP %d", resp.StatusCode)
 	}
 	return 0, nil
 }

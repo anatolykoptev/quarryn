@@ -56,7 +56,8 @@ bearer secret.
 | `FEEDBACK_FILE` | `/var/lib/quarryn/feedback.jsonl` | JSONL fallback log when PG writes fail (records logged, never dropped) |
 | `WATCH_TICK` | `15m` | Watch checker cadence |
 | `WATCH_MAX_PER_TICK` | `10` | Watches processed per tick |
-| `WATCH_NOTIFY_URL` | — | Alertmanager v4 webhook for watch alerts; empty = alerts fail loudly and retry |
+| `WATCH_NOTIFY_URL` | — | Webhook for watch alerts; empty = alerts fail loudly and retry |
+| `WATCH_NOTIFY_FORMAT` | `alertmanager` | Payload shape: `alertmanager` (v4) or `json` — flat body `{event, trigger, watch_id, price_minor, availability, summary, …}` for ntfy/Gotify/custom sinks |
 | `TRUST_ALLOW_DOMAINS` / `TRUST_DENY_DOMAINS` | — | Domain trust overrides (CSV of base domains; deny beats allow) |
 | `TOOL_TIMEOUT` | `90s` | Default per-tool deadline |
 | `TOOL_TIMEOUT_SEARCH` | `3m` | `product_search` deadline (scrape + judge is slow); `product_watch` follows this tier |

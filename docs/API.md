@@ -59,10 +59,12 @@ Price/restock watches on Postgres. `action`: `add | list | get | cancel | check_
 | `include_inactive` | bool | `list`: include cancelled/expired |
 | `history` / `history_limit` | bool / int | `list`: attach observation history per watch (newest first). `get` always includes history. Default 100 rows, max 500 |
 
-Notifications go through an Alertmanager v4 webhook (`WATCH_NOTIFY_URL`)
-with a `trigger` label (`price`/`restock`). Offers that stop
-being extractable become `unverifiable` after repeated failures and stop
-consuming budget. A `condition` whose evaluator is unreachable or
+Notifications POST to `WATCH_NOTIFY_URL`; `WATCH_NOTIFY_FORMAT` selects the
+payload — `alertmanager` (v4 webhook, `trigger` label `price`/`restock`) or
+`json` (flat body: `event`, `trigger`, `watch_id`, `price_minor`,
+`availability`, `summary`, …) for generic sinks like ntfy or Gotify. Offers
+that stop being extractable become `unverifiable` after repeated failures
+and stop consuming budget. A `condition` whose evaluator is unreachable or
 rejects the observation fails closed — the check records the reason and
 no alert is sent.
 

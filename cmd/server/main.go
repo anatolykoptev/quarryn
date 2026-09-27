@@ -101,11 +101,22 @@ func newWatcher(s *search.Searcher, pgdb *postgres.DB, cfg config.Config, initEr
 	if cfg.WatchNotifyURL == "" {
 		slog.Warn("WATCH_NOTIFY_URL unset — watch alerts will keep failing and retrying")
 	}
+	var notifier watch.Notifier
+	switch cfg.WatchNotifyFormat {
+	case "", "alertmanager":
+		notifier = watch.NewAlertmanagerNotifier(cfg.WatchNotifyURL)
+	case "json":
+		notifier = watch.NewWebhookNotifier(cfg.WatchNotifyURL)
+	default:
+		slog.Warn("unknown WATCH_NOTIFY_FORMAT — using alertmanager",
+			slog.String("format", cfg.WatchNotifyFormat))
+		notifier = watch.NewAlertmanagerNotifier(cfg.WatchNotifyURL)
+	}
 	st := watch.NewStore(pgdb.Pool())
 	ch := &watch.Checker{
 		Store:       st,
 		Observer:    watch.NewSearcherObserver(s),
-		Notify:      watch.NewAlertmanagerNotifier(cfg.WatchNotifyURL),
+		Notify:      notifier,
 		Evaluator:   s, // nil-jeff degrade: condition watches fail closed
 		Tick:        cfg.WatchTick,
 		MaxPerTick:  cfg.WatchMaxPerTick,
