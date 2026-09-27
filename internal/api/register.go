@@ -9,6 +9,7 @@ import (
 	"github.com/anatolykoptev/go-product-search/internal/rank"
 	"github.com/anatolykoptev/go-product-search/internal/search"
 	"github.com/anatolykoptev/go-product-search/internal/trust"
+	"github.com/anatolykoptev/go-product-search/internal/watch"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -33,13 +34,15 @@ const (
 // and the pipeline init error (non-nil → handlers report it instead of
 // the tool silently missing).
 type deps struct {
-	searcher *search.Searcher
-	weights  rank.Weights
-	passMin  float64
-	feedback *FeedbackStore
-	prober   *probe.Runner
-	trust    *trust.Provider
-	initErr  error
+	searcher   *search.Searcher
+	weights    rank.Weights
+	passMin    float64
+	feedback   *FeedbackStore
+	prober     *probe.Runner
+	trust      *trust.Provider
+	watchStore watchStorer
+	checker    *watch.Checker
+	initErr    error
 }
 
 // RegisterTools binds product_search, product_match and product_feedback
@@ -52,7 +55,7 @@ type deps struct {
 // RESTBridge auto-exposes the tools under /api/tools/*; the feedback tool
 // additionally answers on POST /api/v1/feedback (registered in main.go,
 // same store).
-func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, feedback *FeedbackStore, prober *probe.Runner, initErr error) {
+func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, feedback *FeedbackStore, prober *probe.Runner, watchStore watchStorer, checker *watch.Checker, initErr error) {
 	d := deps{
 		searcher: searcher,
 		weights: rank.Weights{
@@ -60,14 +63,17 @@ func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config
 			Deal:   cfg.RankDealWeight,
 			Jeff:   cfg.RankJeffWeight,
 		},
-		passMin:  cfg.JeffMatchMin,
-		feedback: feedback,
-		prober:   prober,
-		trust:    trust.New(cfg.TrustAllow, cfg.TrustDeny),
-		initErr:  initErr,
+		passMin:    cfg.JeffMatchMin,
+		feedback:   feedback,
+		prober:     prober,
+		trust:      trust.New(cfg.TrustAllow, cfg.TrustDeny),
+		watchStore: watchStore,
+		checker:    checker,
+		initErr:    initErr,
 	}
 	registerProductSearch(srv, d)
 	registerProductMatch(srv, d)
+	registerProductWatch(srv, d)
 	registerProductFeedback(srv, d)
 	registerProductProbe(srv, d)
 }

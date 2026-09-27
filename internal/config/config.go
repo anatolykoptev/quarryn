@@ -83,6 +83,11 @@ type Config struct {
 	// JSONL file; set → Postgres is the primary sink with the file as
 	// write-failure fallback.
 	DatabaseURL string
+	// WatchNotifyURL is the governed notification endpoint (dozor
+	// alertmanager webhook); WatchTick/WatchMaxPerTick bound the checker.
+	WatchNotifyURL  string
+	WatchTick       time.Duration
+	WatchMaxPerTick int
 
 	// ToolTimeout is the default per-tool deadline; SearchToolTimeout and
 	// MatchToolTimeout override it for the product_search / product_match
@@ -132,6 +137,9 @@ func Load() Config {
 		DomainMinInterval: time.Duration(env.Int("DOMAIN_MIN_INTERVAL_MS", 2000)) * time.Millisecond,
 		FeedbackFile:      env.Str("FEEDBACK_FILE", "/var/lib/go-product-search/feedback.jsonl"),
 		DatabaseURL:       env.Str("DATABASE_URL", ""),
+		WatchNotifyURL:    env.Str("WATCH_NOTIFY_URL", "http://dozor:8765/webhook/alertmanager"),
+		WatchTick:         env.Duration("WATCH_TICK", 15*time.Minute),
+		WatchMaxPerTick:   env.Int("WATCH_MAX_PER_TICK", 10),
 		ToolTimeout:       env.Duration("TOOL_TIMEOUT", 90*time.Second),
 		// product_search runs a wowa scrape (page loads are slow) and then
 		// jeff matching, so it gets the long tier.

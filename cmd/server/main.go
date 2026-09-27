@@ -18,6 +18,7 @@ import (
 	"github.com/anatolykoptev/go-product-search/internal/postgres"
 	"github.com/anatolykoptev/go-product-search/internal/probe"
 	"github.com/anatolykoptev/go-product-search/internal/search"
+	"github.com/anatolykoptev/go-product-search/internal/watch"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -89,8 +90,34 @@ func runMCPServer(cfg config.Config) error {
 		if err != nil {
 			slog.Error("search pipeline init failed", slog.Any("error", err))
 		}
-		api.RegisterTools(srv, searcher, cfg, feedback, probeRunner(searcher, cfg), err)
+		watchStore, checker := newWatcher(searcher, pgdb, cfg, err)
+		api.RegisterTools(srv, searcher, cfg, feedback, probeRunner(searcher, cfg), watchStore, checker, err)
 	})
+}
+
+// newWatcher assembles the price-watch pair (issue #53): needs both pg
+// (state) and the searcher (observations) — with either missing the tool
+// still registers and reports unavailable rather than silently vanishing.
+func newWatcher(s *search.Searcher, pgdb *postgres.DB, cfg config.Config, initErr error) (*watch.Store, *watch.Checker) {
+	if pgdb == nil || initErr != nil {
+		if cfg.DatabaseURL != "" {
+			slog.Warn("watch disabled — postgres or search pipeline unavailable")
+		}
+		return nil, nil
+	}
+	st := watch.NewStore(pgdb.Pool())
+	ch := &watch.Checker{
+		Store:       st,
+		Observer:    watch.NewSearcherObserver(s),
+		Notify:      watch.NewDozorNotifier(cfg.WatchNotifyURL),
+		Tick:        cfg.WatchTick,
+		MaxPerTick:  cfg.WatchMaxPerTick,
+		OfferBudget: 2 * time.Minute,
+		QueryBudget: 4 * time.Minute,
+	}
+	go ch.Run(context.Background())
+	slog.Info("watch checker started", slog.Duration("tick", cfg.WatchTick))
+	return st, ch
 }
 
 // probeRunner picks the acceptance-probe backend: the pipeline's own
