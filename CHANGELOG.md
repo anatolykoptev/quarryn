@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.16.1](https://github.com/anatolykoptev/go-product-search/compare/v1.16.0...v1.16.1) (2026-09-27)
+
+
+### Fixed
+
+* product_watch gets search-tier timeout ([0a33aaa](https://github.com/anatolykoptev/go-product-search/commit/0a33aaa5b97cec02aabd25493f3eda2eb90b5939))
+* watch cancel accepts any non-terminal status ([c830b09](https://github.com/anatolykoptev/go-product-search/commit/c830b099fca13669d4bbca4b8221c43492b7c5f1))
+
 ## [1.16.0](https://github.com/anatolykoptev/go-product-search/compare/v1.15.0...v1.16.0) (2026-09-27)
 
 
