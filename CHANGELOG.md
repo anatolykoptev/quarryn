@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/anatolykoptev/go-product-search/compare/v1.12.0...v1.13.0) (2026-09-27)
+
+
+### Added
+
+* condition enum end-to-end — adapter marks + deterministic condition:ENUM ([#73](https://github.com/anatolykoptev/go-product-search/issues/73)) ([a86eaab](https://github.com/anatolykoptev/go-product-search/commit/a86eaab4da787765658e3f5cade6acfa79830fc2))
+
 ## [1.12.0](https://github.com/anatolykoptev/go-product-search/compare/v1.11.1...v1.12.0) (2026-09-27)
 
 
