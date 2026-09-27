@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.18.0](https://github.com/anatolykoptev/quarryn/compare/v1.17.1...v1.18.0) (2026-09-27)
+
+
+### Added
+
+* **watch:** restock, percent-drop and condition-gated triggers + history ([#101](https://github.com/anatolykoptev/quarryn/issues/101)) ([58a0c6c](https://github.com/anatolykoptev/quarryn/commit/58a0c6cf78525563fafcf02206da19e62e7cedb4))
+
+
+### Documentation
+
+* reader-grade README — live example up front, no filler ([#92](https://github.com/anatolykoptev/quarryn/issues/92)) ([40a0ce5](https://github.com/anatolykoptev/quarryn/commit/40a0ce5299ca44ef6d3650a6a567c899c437a46a))
+* rewrite README for public readers, move env table to OPERATIONS ([#90](https://github.com/anatolykoptev/quarryn/issues/90)) ([f90fd71](https://github.com/anatolykoptev/quarryn/commit/f90fd71b251116059ac6c0310701895cf69980fd))
+
 ## [1.17.1](https://github.com/anatolykoptev/quarryn/compare/v1.17.0...v1.17.1) (2026-09-27)
 
 
