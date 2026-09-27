@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/anatolykoptev/go-product-search/compare/v1.14.0...v1.15.0) (2026-09-27)
+
+
+### Added
+
+* adapter manifest — allowedHosts + userSession, funnel-enforced ([#78](https://github.com/anatolykoptev/go-product-search/issues/78)) ([5e3ee6c](https://github.com/anatolykoptev/go-product-search/commit/5e3ee6c76b79cf5bff210e494093797fb0d46bbc))
+
 ## [1.14.0](https://github.com/anatolykoptev/go-product-search/compare/v1.13.0...v1.14.0) (2026-09-27)
 
 
