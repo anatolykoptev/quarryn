@@ -144,86 +144,84 @@ func checkAvailability(p extract.Product, c Constraints) (ReasonCode, string) {
 	return "", ""
 }
 
-// checkSpec applies the parsed size/chip requirements (issue #111) to the
-// product's disclosed config — name, description and variant titles.
-// Contradiction is fail-closed ("24GB" never satisfies "48–64GB"), but a
-// product that discloses NO relevant spec at all is inconclusive, not
-// wrong — thin listings still get their jeff question.
+// checkSpec applies the parsed size/chip requirements (issue #111) per
+// purchasable row: when a variant matrix exists each row is name+one
+// variant title — pooling every variant into one bag would let a
+// 64GB/512GB variant and a 24GB/1TB variant jointly fake a "64GB AND
+// 1TB" config. Without variants the single row is name+description.
+// Any row satisfying every requirement passes; every row contradicting
+// at least one excludes spec_mismatch; anything else is inconclusive —
+// thin listings keep their jeff question.
 func checkSpec(p extract.Product, c Constraints) (ReasonCode, string) {
 	if len(c.SpecSizes) == 0 && len(c.SpecChips) == 0 {
 		return "", ""
 	}
-	var b strings.Builder
-	b.WriteString(p.Name)
-	b.WriteByte(' ')
-	b.WriteString(p.Description)
-	for _, v := range p.Variants {
-		b.WriteByte(' ')
-		b.WriteString(v.Title)
+	var rows []string
+	if len(p.Variants) > 0 {
+		for _, v := range p.Variants {
+			rows = append(rows, p.Name+" "+v.Title)
+		}
+	} else {
+		rows = []string{p.Name + " " + p.Description}
 	}
-	text := b.String()
-
-	if len(c.SpecSizes) > 0 {
-		if r, d := checkSizes(productSizes(text), c.SpecSizes); r != "" {
-			return r, d
+	contradicts, inconclusive := 0, 0
+	for _, row := range rows {
+		switch rowVerdict(row, c) {
+		case rowSatisfies:
+			return "", ""
+		case rowContradicts:
+			contradicts++
+		default:
+			inconclusive++
 		}
 	}
-	if len(c.SpecChips) > 0 {
-		return checkChips(productChips(text), c.SpecChips)
+	if contradicts > 0 && inconclusive == 0 {
+		return ExclSpecMismatch, fmt.Sprintf(
+			"no purchasable config satisfies sizes %v / chips %v",
+			c.SpecSizes, c.SpecChips)
 	}
 	return "", ""
 }
 
-// checkSizes requires every requested size to be covered by a disclosed
-// value — an interval by containment, a Points set by membership. No
-// disclosed sizes at all passes as inconclusive.
-func checkSizes(have map[int64]bool, reqs []SizeReq) (ReasonCode, string) {
-	if len(have) == 0 {
-		return "", ""
-	}
-	for _, req := range reqs {
-		ok := false
-		for v := range have {
-			if len(req.Points) > 0 {
-				if slices.Contains(req.Points, v) {
-					ok = true
-					break
-				}
-			} else if v >= req.MinGB && v <= req.MaxGB {
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			return ExclSpecMismatch, fmt.Sprintf(
-				"required size %s not in product sizes %v",
-				req, sortedKeys(have))
-		}
-	}
-	return "", ""
-}
+const (
+	rowInconclusive = iota
+	rowSatisfies
+	rowContradicts
+)
 
-// checkChips requires every requested gen+tier to be met by a disclosed
-// chip; no disclosed chip at all passes as inconclusive.
-func checkChips(have []chipMention, reqs []ChipReq) (ReasonCode, string) {
-	if len(have) == 0 {
-		return "", ""
+// rowVerdict scores one purchasable config row: satisfies when every
+// requirement is met, contradicts when at least one is answerable yet
+// unmet, inconclusive when a requirement has nothing to speak to.
+func rowVerdict(text string, c Constraints) int {
+	ms := rowSizes(text)
+	verdict := rowSatisfies
+	for _, req := range c.SpecSizes {
+		if slices.ContainsFunc(ms, req.satisfiedBy) {
+			continue
+		}
+		if req.answerableBy(ms) {
+			return rowContradicts
+		}
+		verdict = rowInconclusive
 	}
-	for _, req := range reqs {
+	chips := rowChips(text)
+	for _, req := range c.SpecChips {
 		ok := false
-		for _, ch := range have {
+		for _, ch := range chips {
 			if ch.gen == req.Gen && ch.tier >= req.MinTier {
 				ok = true
 				break
 			}
 		}
-		if !ok {
-			return ExclSpecMismatch, fmt.Sprintf(
-				"required chip m%d tier>=%d, product offers %v",
-				req.Gen, req.MinTier, have)
+		if ok {
+			continue
 		}
+		if len(chips) > 0 {
+			return rowContradicts
+		}
+		verdict = rowInconclusive
 	}
-	return "", ""
+	return verdict
 }
 
 // containsWord reports whether haystack (already lower-cased) contains

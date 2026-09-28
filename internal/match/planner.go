@@ -131,14 +131,12 @@ func PlanCriteria(raw []string) (Plan, error) {
 		seen[c] = struct{}{}
 		// Machine-checkable spec tokens (sizes, chip tiers) inside a
 		// free-text criterion become deterministic constraints — jeff is
-		// demonstrably soft on numbers (issue #111). A criterion that is
-		// nothing BUT spec tokens earns no question at all.
-		sizes, chips, residue := parseSpec(c)
+		// demonstrably soft on numbers (issue #111). The question still
+		// goes to jeff: a product that discloses no spec is inconclusive
+		// to the deterministic gate and needs the judge.
+		sizes, chips := parseSpec(c)
 		plan.Constraints.SpecSizes = append(plan.Constraints.SpecSizes, sizes...)
 		plan.Constraints.SpecChips = append(plan.Constraints.SpecChips, chips...)
-		if specOnly(residue) {
-			continue
-		}
 		if len(plan.Questions) >= maxQuestions {
 			return Plan{}, fmt.Errorf("criterion %d: %w", i, ErrTooManyCriteria)
 		}

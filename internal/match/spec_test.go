@@ -8,15 +8,16 @@ import (
 )
 
 // The observed failure in #111: "48 or 64GB" passed a 24GB listing on
-// vibes. Spec tokens must land in deterministic constraints, and a
-// pure-spec criterion must not mint a jeff question.
+// vibes. Spec tokens must land in deterministic constraints — while the
+// jeff question stays, because a product disclosing no spec is
+// inconclusive to the deterministic gate.
 func TestPlanCriteriaSpecTokens(t *testing.T) {
 	plan, err := PlanCriteria([]string{"64GB", "1TB"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Questions) != 0 {
-		t.Fatalf("pure-spec criteria must not reach jeff: %+v", plan.Questions)
+	if len(plan.Questions) != 2 {
+		t.Fatalf("inconclusive products still need a judge: %+v", plan.Questions)
 	}
 	if len(plan.Constraints.SpecSizes) != 2 {
 		t.Fatalf("spec sizes = %+v", plan.Constraints.SpecSizes)
@@ -100,6 +101,33 @@ func TestCheckSpecAlternatives(t *testing.T) {
 	}
 	if r, _ := checkSpec(prod("MacBook Pro 48GB / 1TB"), c); r != ExclSpecMismatch {
 		t.Fatalf("48GB must fail 32|64, got %q", r)
+	}
+}
+
+func TestCheckSpecRAMVsStorage(t *testing.T) {
+	// "64GB RAM" must not be satisfied by 64GB of storage beside 24GB RAM.
+	sizes, _ := parseSpec("64GB RAM")
+	c := Constraints{SpecSizes: sizes}
+	if r, _ := checkSpec(prod("Mini PC 24GB RAM 64GB storage"), c); r != ExclSpecMismatch {
+		t.Fatalf("24GB RAM + 64GB storage must fail a 64GB-RAM ask, got %q", r)
+	}
+	if r, _ := checkSpec(prod("Laptop 64GB unified memory / 1TB SSD"), c); r != "" {
+		t.Fatalf("64GB unified memory must satisfy a 64GB-RAM ask, got %q", r)
+	}
+}
+
+func TestCheckSpecVariantRowsDoNotPool(t *testing.T) {
+	// Two variants must not combine: 64GB/512GB + 24GB/1TB ≠ 64GB+1TB.
+	c := Constraints{SpecSizes: []SizeReq{
+		{MinGB: 64, MaxGB: 64}, {MinGB: 1024, MaxGB: 1024},
+	}}
+	bad := prod("MacBook Pro", "18C/20G / 64GB / 512GB", "15C/16G / 24GB / 1TB")
+	if r, _ := checkSpec(bad, c); r != ExclSpecMismatch {
+		t.Fatalf("cross-variant pooling must fail, got %q", r)
+	}
+	good := prod("MacBook Pro", "18C/20G / 64GB / 512GB", "20C/24G / 64GB / 1TB")
+	if r, _ := checkSpec(good, c); r != "" {
+		t.Fatalf("a real 64GB/1TB variant must satisfy, got %q", r)
 	}
 }
 
