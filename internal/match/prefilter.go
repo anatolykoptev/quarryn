@@ -2,6 +2,7 @@ package match
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -31,6 +32,7 @@ const (
 	ExclConditionMismatch    ReasonCode = "condition_mismatch"
 	ExclExtractionFailed     ReasonCode = "extraction_failed"
 	ExclDeferredRender       ReasonCode = "deferred_render"
+	ExclSpecMismatch         ReasonCode = "spec_mismatch"
 )
 
 // checkCandidate runs the deterministic constraints against one enriched
@@ -53,7 +55,10 @@ func checkCandidate(p extract.Product, c Constraints) (ReasonCode, string) {
 	if r, d := checkAvailability(p, c); r != "" {
 		return r, d
 	}
-	return checkCondition(p, c)
+	if r, d := checkCondition(p, c); r != "" {
+		return r, d
+	}
+	return checkSpec(p, c)
 }
 
 // checkCondition requires an exact canonical-enum match, same rule as
@@ -135,6 +140,88 @@ func checkTerms(p extract.Product, c Constraints) (ReasonCode, string) {
 func checkAvailability(p extract.Product, c Constraints) (ReasonCode, string) {
 	if c.Availability != "" && p.Availability != c.Availability {
 		return ExclAvailabilityMismatch, fmt.Sprintf("availability %q != required %q", p.Availability, c.Availability)
+	}
+	return "", ""
+}
+
+// checkSpec applies the parsed size/chip requirements (issue #111) to the
+// product's disclosed config — name, description and variant titles.
+// Contradiction is fail-closed ("24GB" never satisfies "48–64GB"), but a
+// product that discloses NO relevant spec at all is inconclusive, not
+// wrong — thin listings still get their jeff question.
+func checkSpec(p extract.Product, c Constraints) (ReasonCode, string) {
+	if len(c.SpecSizes) == 0 && len(c.SpecChips) == 0 {
+		return "", ""
+	}
+	var b strings.Builder
+	b.WriteString(p.Name)
+	b.WriteByte(' ')
+	b.WriteString(p.Description)
+	for _, v := range p.Variants {
+		b.WriteByte(' ')
+		b.WriteString(v.Title)
+	}
+	text := b.String()
+
+	if len(c.SpecSizes) > 0 {
+		if r, d := checkSizes(productSizes(text), c.SpecSizes); r != "" {
+			return r, d
+		}
+	}
+	if len(c.SpecChips) > 0 {
+		return checkChips(productChips(text), c.SpecChips)
+	}
+	return "", ""
+}
+
+// checkSizes requires every requested size to be covered by a disclosed
+// value — an interval by containment, a Points set by membership. No
+// disclosed sizes at all passes as inconclusive.
+func checkSizes(have map[int64]bool, reqs []SizeReq) (ReasonCode, string) {
+	if len(have) == 0 {
+		return "", ""
+	}
+	for _, req := range reqs {
+		ok := false
+		for v := range have {
+			if len(req.Points) > 0 {
+				if slices.Contains(req.Points, v) {
+					ok = true
+					break
+				}
+			} else if v >= req.MinGB && v <= req.MaxGB {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return ExclSpecMismatch, fmt.Sprintf(
+				"required size %s not in product sizes %v",
+				req, sortedKeys(have))
+		}
+	}
+	return "", ""
+}
+
+// checkChips requires every requested gen+tier to be met by a disclosed
+// chip; no disclosed chip at all passes as inconclusive.
+func checkChips(have []chipMention, reqs []ChipReq) (ReasonCode, string) {
+	if len(have) == 0 {
+		return "", ""
+	}
+	for _, req := range reqs {
+		ok := false
+		for _, ch := range have {
+			if ch.gen == req.Gen && ch.tier >= req.MinTier {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return ExclSpecMismatch, fmt.Sprintf(
+				"required chip m%d tier>=%d, product offers %v",
+				req.Gen, req.MinTier, have)
+		}
 	}
 	return "", ""
 }

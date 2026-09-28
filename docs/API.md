@@ -13,7 +13,7 @@ Full pipeline: adapters → extract → match → rank.
 | Arg | Type | Notes |
 |---|---|---|
 | `query` | string | Product search query |
-| `criteria` | string[] | Deterministic `key:value` constraints (`price_max:500`, `brand:sony`, `not_keyword:refurbished`, `availability:in_stock`, `condition:new`, `currency:usd`) and/or free-text subjective requirements judged per product |
+| `criteria` | string[] | Deterministic `key:value` constraints (`price_max:500`, `brand:sony`, `not_keyword:refurbished`, `availability:in_stock`, `condition:new`, `currency:usd`) and/or free-text requirements. Machine-checkable specs inside free text — sizes `64GB`/`48–64GB`/`32GB or 64GB` (GB↔TB normalized) and Apple-silicon tiers `M5 Pro`/`M5 Max` — are enforced deterministically against name/description/variant titles: a contradiction excludes (`spec_mismatch`), no disclosed spec stays for judging |
 | `max_results` | int | Default 10, max 50 |
 
 Returns `request_id`, ranked `results` (with `offer_id`), `sources`,
