@@ -59,6 +59,15 @@ type Product struct {
 	// detail extraction — identity is fixed at the SERP boundary.
 	OfferID string `json:"offer_id,omitempty"`
 	Method  string `json:"method"`
+	// Exact product identifiers for cross-store grouping (issue #98).
+	// GTIN is the global code (gtin8/12/13/14, any source); MPN the
+	// manufacturer part number; SKU the merchant's product-level code —
+	// set only when it identifies the whole product, not one variant.
+	// Never populated from titles — string-matching names produces false
+	// merges and poisons price history.
+	SKU  string `json:"sku,omitempty"`
+	MPN  string `json:"mpn,omitempty"`
+	GTIN string `json:"gtin,omitempty"`
 	// BuyURL is the resolved merchant URL captured when the interact tier
 	// followed a deal aggregator's outbound tracker (slickdeals /click).
 	// Distinct from URL (the listing/thread address) — this is where the
@@ -105,6 +114,101 @@ type EnrichedCandidate struct {
 	// (EXTRACT_LLM_DAILY_MAX) was reached. Typed data, not an error — the
 	// candidate continues with whatever the cheaper tiers produced.
 	LLMBudgetExhausted bool `json:"llm_budget_exhausted,omitempty"`
+}
+
+// GroupKey returns the offer-grouping identity (issue #98): a namespaced
+// exact-identifier key — "gtin:" preferred over "mpn:" over "sku:" — or ""
+// when the product carries no usable identifier. Equality of GroupKey is
+// the ONLY grouping signal; keys are normalized so "Z1ML-00050" and
+// "z1ml00050" collide, while validation rejects junk codes:
+//   - gtin must be a real GTIN-8/12/13/14 (mod-10 check digit) — markup
+//     placeholders like "00000000" would otherwise merge strangers.
+//   - sku keys must look like a vendor code: ≥6 alphanumeric chars with
+//     ≥1 digit. A merchant SKU is store-scoped; short alphabetic codes
+//     ("BLACK", "SALE1" is fine — "BLACKM" is not) collide across stores
+//     far more often than alnum+digit catalog codes do. Residual risk
+//     exists by design — sku is the weakest tier.
+func (p Product) GroupKey() string {
+	if g := digitsOnly(p.GTIN); validGTIN(g) {
+		return "gtin:" + g
+	}
+	if m := identNorm(p.MPN); len(m) >= 4 {
+		return "mpn:" + m
+	}
+	if s := identNorm(p.SKU); looksLikeVendorSKU(s) {
+		return "sku:" + s
+	}
+	return ""
+}
+
+// identNorm normalizes a merchant/manufacturer code for keying: lowercase,
+// alphanumeric only. Digits stay; separators ("-", "/", " ", ".") vanish.
+func identNorm(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// digitsOnly strips a GTIN to its digits — markup carries "0-19-425205-4"
+// and space-separated shapes; the check digit is part of the identity.
+func digitsOnly(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// validGTIN enforces real GTIN shape: 8/12/13/14 digits, a correct mod-10
+// check digit, and not all-identical digits (a placeholder that passes the
+// checksum trivially). Scraped markup is untrusted — accepting any 8+
+// digits would let placeholders merge unrelated offers (review).
+func validGTIN(g string) bool {
+	switch len(g) {
+	case 8, 12, 13, 14:
+	default:
+		return false
+	}
+	sum := 0
+	same := true
+	for i := 0; i < len(g)-1; i++ {
+		d := int(g[i] - '0')
+		// From the right, weights alternate 3,1,3,1… starting at 3 for
+		// the digit immediately left of the check digit.
+		if (len(g)-1-i)%2 == 1 {
+			sum += 3 * d
+		} else {
+			sum += d
+		}
+		if g[i] != g[0] {
+			same = false
+		}
+	}
+	if same && g[len(g)-1] == g[0] {
+		return false
+	}
+	return int(g[len(g)-1]-'0') == (10-sum%10)%10
+}
+
+// looksLikeVendorSKU filters merchant codes unlikely to name a product
+// globally: too short, or purely alphabetic (cross-store collisions like
+// "BLACK"). Vendor-derived codes (Z1ML00050, WH1000XM5B) carry digits.
+func looksLikeVendorSKU(s string) bool {
+	if len(s) < 6 {
+		return false
+	}
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			return true
+		}
+	}
+	return false
 }
 
 // PublicBlurbMax caps the description blurb that may leave the box.

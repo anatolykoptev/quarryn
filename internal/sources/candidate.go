@@ -28,6 +28,9 @@ type Candidate struct {
 	DiscountPct  *float64 `json:"discount_pct,omitempty"`
 	Thumbs       *int     `json:"thumbs,omitempty"`
 	ImageURL     string   `json:"image_url,omitempty"`
+	// SKU is the product-level merchant SKU (MetaSKU) — present only when
+	// it identifies the whole listing, never a single variant's code.
+	SKU string `json:"sku,omitempty"`
 
 	// Variants is the purchasable-configuration matrix when the listing is
 	// a configurator/optioned product (issue #115). Adapter-emitted, wire
@@ -54,6 +57,7 @@ var liftedKeys = map[string]struct{}{
 	MetaThumbs:       {},
 	MetaImageURL:     {},
 	MetaVariants:     {},
+	MetaSKU:          {},
 }
 
 // candidateFromResult decodes a funnel-merged Result into a Candidate.
@@ -70,6 +74,7 @@ func candidateFromResult(r sources.Result) Candidate {
 		Availability: r.Metadata[MetaAvailability],
 		Seller:       r.Metadata[MetaSeller],
 		ImageURL:     r.Metadata[MetaImageURL],
+		SKU:          r.Metadata[MetaSKU],
 	}
 	// decodeFailed collects lifted keys whose value did not parse — they
 	// still land in Metadata so nothing vanishes silently.

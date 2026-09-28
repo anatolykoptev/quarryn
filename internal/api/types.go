@@ -54,6 +54,31 @@ type productResult struct {
 	ExcludedReason  string                  `json:"excluded_reason,omitempty"`
 	ExcludedDetail  string                  `json:"excluded_detail,omitempty"`
 	UnjudgedReason  string                  `json:"unjudged_reason,omitempty"`
+	// GroupKey is the exact-identifier product identity (issue #98) —
+	// "gtin:"/"mpn:"/"sku:" + normalized code. Results sharing a key are
+	// offers for the same product; absent when the page disclosed none.
+	GroupKey string `json:"group_key,omitempty"`
+}
+
+// groupOffer is one member offer inside a cross-store product group —
+// the minimal comparison view: where, how much, still passing.
+type groupOffer struct {
+	URL          string `json:"url"`
+	Source       string `json:"source"`
+	PriceMinor   *int64 `json:"price_minor,omitempty"`
+	Currency     string `json:"currency,omitempty"`
+	Availability string `json:"availability,omitempty"`
+	Passed       bool   `json:"passed"`
+}
+
+// productGroup is the "same product across stores" row (issue #98):
+// every offer sharing one exact identifier, plus the cheapest passing
+// offer as best_offer — nil when offers mix currencies (a raw minor-unit
+// compare across currencies would lie).
+type productGroup struct {
+	Key       string       `json:"key"`
+	BestOffer *groupOffer  `json:"best_offer,omitempty"`
+	Offers    []groupOffer `json:"offers"`
 }
 
 // searchOutput is the product_search response. RequestID is the ADR-6
@@ -66,6 +91,10 @@ type searchOutput struct {
 	Degraded      bool                     `json:"degraded,omitempty"`
 	DegradeReason string                   `json:"degrade_reason,omitempty"`
 	Brief         *searchBrief             `json:"brief,omitempty"`
+	// Groups lists cross-store same-product clusters (issue #98): keys
+	// shared by offers from ≥2 distinct stores. Exact-identifier equality
+	// only — never title similarity.
+	Groups []productGroup `json:"groups,omitempty"`
 }
 
 // matchOutput is the product_match response — a single judged product.

@@ -771,6 +771,7 @@ func productFromCandidate(c sources.Candidate) Product {
 		Description:  c.Content,
 		Source:       domainOf(c.URL),
 		OfferID:      c.OfferID,
+		SKU:          c.SKU,
 		Variants:     c.Variants,
 		Method:       MethodSERP,
 	}
@@ -817,10 +818,26 @@ func mergeOptional(dst *Product, src *Product) {
 	if dst.Description == "" {
 		dst.Description = src.Description
 	}
+	mergeIdentifiers(dst, src)
 	if len(dst.Variants) == 0 && len(src.Variants) > 0 {
 		dst.Variants = src.Variants
 	}
 	if len(dst.Raw) == 0 && len(src.Raw) > 0 {
 		dst.Raw = src.Raw
+	}
+}
+
+// mergeIdentifiers fills the exact-identifier triple (issue #98) — the
+// strongest source wins per field; a present value is never overwritten
+// (SERP-level identity predates detail extraction).
+func mergeIdentifiers(dst *Product, src *Product) {
+	if dst.SKU == "" {
+		dst.SKU = src.SKU
+	}
+	if dst.MPN == "" {
+		dst.MPN = src.MPN
+	}
+	if dst.GTIN == "" {
+		dst.GTIN = src.GTIN
 	}
 }
