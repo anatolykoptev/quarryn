@@ -183,14 +183,35 @@ func (o *SearcherObserver) observeQuery(ctx context.Context, w Watch) Observatio
 	if best == nil {
 		return Observation{Outcome: OutcomeNoOffers, Detail: "no passed offer in currency " + w.Currency}
 	}
+	// The search leg may have served the winner from the 24h extraction
+	// cache — a watch must never alert on a stale price (issue #120).
+	// Re-read the winning URL live (MatchURL is freshness-critical) and
+	// report what the page says NOW, not what the cache remembered.
+	out, err = o.s.MatchURL(ctx, bestURL, nil)
+	if err != nil {
+		return Observation{Outcome: OutcomeFetchFailed, Detail: "live confirm: " + err.Error()}
+	}
+	live := firstProduct(out)
+	if live == nil || live.PriceMinor == nil {
+		return Observation{
+			Outcome: OutcomeExtractEmpty,
+			Detail:  "live confirm extracted nothing — listing may be gone",
+		}
+	}
+	if live.Currency != w.Currency {
+		return Observation{
+			Outcome: OutcomeNoOffers,
+			Detail:  "live offer currency " + live.Currency + " != " + w.Currency,
+		}
+	}
 	return Observation{
-		PriceMinor:   best.PriceMinor,
-		Currency:     best.Currency,
-		Availability: best.Availability,
+		PriceMinor:   live.PriceMinor,
+		Currency:     live.Currency,
+		Availability: live.Availability,
 		OfferURL:     bestURL,
 		OfferID:      bestID,
 		Outcome:      OutcomeOK,
-		Product:      best,
+		Product:      live,
 	}
 }
 

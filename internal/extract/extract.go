@@ -210,7 +210,7 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 
 	var outcome string
 	if len(prod.problems()) > 0 {
-		if cached, ok := p.cachedProduct(ctx, key); ok {
+		if cached, ok := p.cachedProduct(ctx, key); ok && !freshFrom(ctx) {
 			// A variant-less entry cached before this feature (24h TTL) or
 			// under a failed .js fetch still gets one rescue attempt —
 			// pinned watches must not ride out the TTL reporting

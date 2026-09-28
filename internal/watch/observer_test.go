@@ -1,9 +1,17 @@
 package watch
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/anatolykoptev/go-kit/wowa"
+	"github.com/anatolykoptev/quarryn/internal/config"
 	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/search"
 	"github.com/anatolykoptev/quarryn/internal/sources"
 )
 
@@ -129,3 +137,79 @@ func TestObserveVariantScopesConditionProduct(t *testing.T) {
 		t.Fatal("parent product mutated by pinning")
 	}
 }
+
+// A query watch must never alert on the 24h extraction cache's memory of
+// a price (issue #120): the search leg caches the winner, then the live
+// confirm re-reads the page and reports what it says NOW. The stub drops
+// the price between the two reads — the observation must carry 199.99.
+func TestObserveQueryConfirmsWinnerLive(t *testing.T) {
+	for _, k := range []string{
+		"EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET",
+		"ETSY_API_KEY", "ETSY_SHARED_SECRET",
+		"SHOPIFY_SHOPS", "INTERNAL_SERVICE_SECRET", "REDIS_URL",
+	} {
+		t.Setenv(k, "")
+	}
+	var detailFetches atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v1/fetch" {
+			http.NotFound(w, r)
+			return
+		}
+		var req wowa.FetchRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		body := rssDeal
+		if strings.Contains(req.URL, "deal-9") {
+			n := detailFetches.Add(1)
+			price := "249.99"
+			if n > 1 {
+				price = "199.99" // the drop the alert must see
+			}
+			body = strings.ReplaceAll(dealPageHTML, "249.99", price)
+		}
+		_ = json.NewEncoder(w).Encode(wowa.FetchResponse{Status: 200, Body: body})
+	}))
+	t.Cleanup(srv.Close)
+
+	s, err := search.New(config.Config{WowaURL: srv.URL},
+		sources.WithManifestGate(func(sources.Manifest, string) bool { return true }))
+	if err != nil {
+		t.Fatalf("search.New: %v", err)
+	}
+	obs := NewSearcherObserver(s).Observe(t.Context(), Watch{
+		Kind: KindQuery, Query: "deal", Currency: "USD",
+	})
+	if obs.Outcome != OutcomeOK {
+		t.Fatalf("outcome = %q (%s)", obs.Outcome, obs.Detail)
+	}
+	if obs.PriceMinor == nil || *obs.PriceMinor != 19999 {
+		t.Fatalf("price = %v — the live confirm must win over the cached 249.99", obs.PriceMinor)
+	}
+	if detailFetches.Load() != 2 {
+		t.Fatalf("detail fetches = %d, want 2 (search + live confirm)", detailFetches.Load())
+	}
+}
+
+// rssDeal + dealPageHTML mirror the search-package fixtures: a price-less
+// SERP item whose detail page carries JSON-LD — the detail fetch fills
+// (and caches) the product the confirm leg then re-reads.
+const rssDeal = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel><title>Slickdeals</title>
+    <item>
+      <title>Acme 4K Monitor — hot deal</title>
+      <link>http://203.0.113.50/deal-9</link>
+      <description><![CDATA[Merchant: Acme]]></description>
+    </item>
+  </channel>
+</rss>`
+
+const dealPageHTML = `<!doctype html><html><head>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Product",
+ "name":"Acme 4K Monitor 27in",
+ "url":"http://203.0.113.50/deal-9",
+ "offers":{"@type":"Offer","price":"249.99","priceCurrency":"USD",
+   "availability":"https://schema.org/InStock"}}
+</script></head><body>monitor</body></html>`

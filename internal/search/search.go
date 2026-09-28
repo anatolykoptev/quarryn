@@ -216,11 +216,13 @@ func (s *Searcher) SearchDetailed(ctx context.Context, query string, criteria []
 }
 
 // MatchURL runs the per-candidate path for one caller-supplied product URL
-// — the product_match tool's backend. The funnel is bypassed (no adapter
-// fan-out), but the URL still passes the same SSRF screen the funnel
-// applies at candidate ingress (ADR-14: a caller-supplied URL is
-// third-party egress too) and then goes through the identical extraction +
-// match chain a search candidate would.
+// — the product_match tool's backend and the offer-watch re-fetch. The
+// funnel is bypassed (no adapter fan-out), but the URL still passes the
+// same SSRF screen the funnel applies at candidate ingress (ADR-14: a
+// caller-supplied URL is third-party egress too) and then goes through
+// the identical extraction + match chain a search candidate would. The
+// call is freshness-critical by contract — "judge THIS url now" — so the
+// 24h extraction cache is read-bypassed (but still written, #120).
 func (s *Searcher) MatchURL(ctx context.Context, rawURL string, criteria []string) (Output, error) {
 	if err := httputil.CheckRawURL(ctx, rawURL); err != nil {
 		return Output{}, err
@@ -239,7 +241,7 @@ func (s *Searcher) MatchURL(ctx context.Context, rawURL string, criteria []strin
 		ctx = pssources.WithPageBudget(ctx, pssources.NewPageBudget(s.maxPages))
 	}
 	c := pssources.Candidate{Source: "direct", URL: rawURL}
-	mres := s.matcher.Match(ctx, s.pipeline.Enrich(ctx, []pssources.Candidate{c}), plan)
+	mres := s.matcher.Match(ctx, s.pipeline.Enrich(extract.WithFresh(ctx), []pssources.Candidate{c}), plan)
 	return Output{
 		RequestID:     reqID,
 		Candidates:    mres.Candidates,
