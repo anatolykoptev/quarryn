@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/anatolykoptev/go-kit/cache"
 	"github.com/anatolykoptev/go-kit/wowa"
@@ -381,6 +382,32 @@ func TestShopifyJSRefusesCrossHostRedirect(t *testing.T) {
 	}
 	if f.count("169.254") != 0 {
 		t.Fatalf("private host fetched via redirect: %v", f.seen)
+	}
+}
+
+// An over-cap optional field is data to sanitize, not a reason to fail
+// the whole extraction — live: expercom's 2231-rune schema description
+// returned a complete product marked extraction_failed.
+func TestOverCapDescriptionClipsNotFails(t *testing.T) {
+	page := "https://s.example.com/products/widget"
+	f := &routerFetcher{pages: map[string]*wowa.FetchResponse{
+		page: {Status: 200, Body: `<!doctype html><html><head>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Product","name":"Widget",
+ "description":"` + strings.Repeat("d", 2500) + `",
+ "offers":{"@type":"Offer","price":"19.99","priceCurrency":"USD"}}
+</script></head><body></body></html>`},
+	}}
+	p := New(f, nil, testConfig())
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		{Source: "web", URL: page},
+	})
+	got := out[0]
+	if got.ExtractionFailed {
+		t.Fatalf("over-cap description sank extraction: %s", got.FailureReason)
+	}
+	if utf8.RuneCountInString(got.Product.Description) > maxDescriptionLen {
+		t.Fatalf("description not clipped: %d runes", utf8.RuneCountInString(got.Product.Description))
 	}
 }
 

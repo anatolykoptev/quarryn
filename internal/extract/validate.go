@@ -131,6 +131,27 @@ func (p *Product) enumProblems(out []string) []string {
 	return out
 }
 
+// normalizeBounds clips optional text fields to their caps so a long
+// schema.org description never becomes a validation failure — the
+// egress blurb truncates further anyway. URLs over the cap are dropped
+// rather than cut mid-string (a truncated URL is a broken one).
+func (p *Product) normalizeBounds() {
+	p.Name = clipRunes(p.Name, maxNameLen)
+	p.Description = clipRunes(p.Description, maxDescriptionLen)
+	p.SellerName = clipRunes(p.SellerName, maxSellerLen)
+	if len(p.ImageURL) > maxURLLen {
+		p.ImageURL = ""
+	}
+}
+
+// clipRunes truncates s to max runes, no-op when already inside.
+func clipRunes(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	return string([]rune(s)[:max])
+}
+
 // boundProblems checks URL shape and per-field length caps.
 func (p *Product) boundProblems(out []string) []string {
 	if u, err := url.Parse(p.URL); err != nil || u.Host == "" ||

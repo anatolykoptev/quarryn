@@ -227,6 +227,12 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 	// rescue and its disposition cleanup live in shopifyRescue.
 	outcome = p.shopifyRescue(ctx, c, &prod, &ec, outcome, budget)
 
+	// Optional fields past their caps are data to sanitize, not grounds
+	// to sink an otherwise-valid extraction — the egress blurb truncates
+	// further anyway (live v1.23.1: a 2231-rune schema.org description
+	// failed a complete expercom product on this bound alone).
+	prod.normalizeBounds()
+
 	if probs := prod.problems(); len(probs) > 0 {
 		ec.ExtractionFailed = true
 		ec.FailureReason = strings.Join(probs, "; ")
@@ -275,6 +281,7 @@ func cacheableMethod(m string) bool {
 func (p *Pipeline) shopifyRescue(ctx context.Context, c sources.Candidate, prod *Product, ec *EnrichedCandidate, outcome string, budget *atomic.Int64) string {
 	wasIncomplete := len(prod.problems()) > 0
 	p.tryShopifyVariants(ctx, c, prod, budget, shopifySuspected(c))
+	prod.normalizeBounds()
 	if wasIncomplete && len(prod.problems()) == 0 {
 		ec.NeedsRender = false
 		return ""
