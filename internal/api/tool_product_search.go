@@ -15,8 +15,10 @@ const productSearchDesc = "Search marketplace adapters for products matching a q
 	"with free-text subjective criteria judged per product (\"good battery life\", \"durable build\"). " +
 	"Returns ranked products with fused scores, per-criterion verdicts and deal signals " +
 	"(discount_pct, thumbs, rating). degraded:true means the judge service was unreachable and " +
-	"ranking ran on deterministic features only. Read-only; latency is tens of seconds — " +
-	"it scrapes real marketplace pages."
+	"ranking ran on deterministic features only. Each result's url is the purchase page " +
+	"(merchant URL when an outbound hop resolved, e.g. a deal-aggregator thread); " +
+	"source_url keeps the originating listing when they differ. Read-only; latency is " +
+	"tens of seconds — it scrapes real marketplace pages."
 
 func registerProductSearch(srv *mcp.Server, d deps) {
 	mcpserver.AddTool(srv, &mcp.Tool{
@@ -65,11 +67,20 @@ func handleProductSearch(ctx context.Context, d deps, in productSearchInput) (*m
 
 // project maps one ranked candidate to the egress-safe result shape.
 // PublicProduct is the only product data that may leave the box; the
-// listing URL and adapter name ride alongside it.
+// purchase URL and adapter name ride alongside it. URL carries the
+// merchant page when an outbound hop resolved (matching what a user
+// wants to open); the aggregator thread survives in SourceURL.
 func project(r rank.Result, tp *trust.Provider) productResult {
 	jc := r.Judged
+	url, source := jc.Product.BuyURL, ""
+	if url == "" {
+		url = jc.URL
+	} else if url != jc.URL {
+		source = jc.URL
+	}
 	return productResult{
-		URL:             jc.URL,
+		URL:             url,
+		SourceURL:       source,
 		Adapter:         jc.Source,
 		BuyURL:          jc.Product.BuyURL,
 		Trust:           string(tp.ClassifyMerchant(jc.Product.BuyURL, jc.URL)),
