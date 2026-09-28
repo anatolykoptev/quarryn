@@ -35,6 +35,13 @@ func shopifyJSURL(raw string) string {
 	return u.Scheme + "://" + u.Host + path + ".js"
 }
 
+// shopifySuspected is the cheap pre-fetch gate for the .js probe: the
+// adapter source, or the canonical /products/<handle> path shape that
+// only Shopify storefronts (and a rare false positive) carry.
+func shopifySuspected(c sources.Candidate) bool {
+	return c.Source == "shopify" || shopifyJSURL(c.URL) != ""
+}
+
 // looksShopifyPage detects a Shopify storefront from the fetched HTML —
 // the CDN asset host and the Shopify global are both load-bearing marks a
 // non-shopify page does not produce.
@@ -80,24 +87,101 @@ func (p *Pipeline) tryShopifyVariants(ctx context.Context, c sources.Candidate, 
 		URL:         jsURL,
 		TimeoutSecs: p.cfg.FetchTimeoutSecs,
 	})
+	if err != nil {
+		return
+	}
+	// Shopify normalizes storefront hosts (www→apex): wowa returns the
+	// 301 verbatim, so follow the one hop — but only while the Location
+	// still resolves to a /products/<handle>.js shape (bounds the hop to
+	// the same endpoint family, never an arbitrary target).
+	if resp.Status >= 300 && resp.Status < 400 {
+		if next := shopifyJSURL(resolveLocation(jsURL, headerLocation(resp.Headers))); next != "" && next != jsURL {
+			if r2, err := p.fetch.Fetch(ctx, wowa.FetchRequest{
+				URL:         next,
+				TimeoutSecs: p.cfg.FetchTimeoutSecs,
+			}); err == nil {
+				resp = r2
+				jsURL = next
+			}
+		}
+	}
+	if resp.Status != 200 {
+		return
+	}
+	if p.shopifyJSMerge(prod, resp.Body) {
+		p.tryShopifyCurrency(ctx, jsURL, prod, budget)
+	}
+}
+
+// tryShopifyCurrency fills the store-level field the product doc does not
+// carry: /cart.js answers {"currency":"USD",…} on every storefront. Runs
+// only when the merge left Currency empty — a page/schema fill already
+// knows it, and a dead page means the probe pays for itself.
+func (p *Pipeline) tryShopifyCurrency(ctx context.Context, jsURL string, prod *Product, budget *atomic.Int64) {
+	if prod.Currency != "" || budget.Add(-1) < 0 {
+		return
+	}
+	u, err := url.Parse(jsURL)
+	if err != nil || u.Host == "" {
+		return
+	}
+	resp, err := p.fetch.Fetch(ctx, wowa.FetchRequest{
+		URL:         u.Scheme + "://" + u.Host + "/cart.js",
+		TimeoutSecs: p.cfg.FetchTimeoutSecs,
+	})
 	if err != nil || resp.Status != 200 {
 		return
 	}
-	p.shopifyJSMerge(prod, resp.Body)
+	var cart struct {
+		Currency string `json:"currency"`
+	}
+	if json.Unmarshal([]byte(resp.Body), &cart) == nil {
+		prod.Currency = strings.ToUpper(strings.TrimSpace(cart.Currency))
+	}
+}
+
+// headerLocation reads the redirect target case-insensitively — the
+// upstream header map's key casing is a wowa implementation detail.
+func headerLocation(h map[string]string) string {
+	for k, v := range h {
+		if strings.EqualFold(k, "location") {
+			return v
+		}
+	}
+	return ""
+}
+
+// resolveLocation resolves a possibly-relative Location target against
+// the URL that produced it.
+func resolveLocation(from, loc string) string {
+	loc = strings.TrimSpace(loc)
+	u, err := url.Parse(loc)
+	if err != nil || loc == "" {
+		return ""
+	}
+	if u.IsAbs() {
+		return loc
+	}
+	base, err := url.Parse(from)
+	if err != nil {
+		return ""
+	}
+	return base.ResolveReference(u).String()
 }
 
 // shopifyJSMerge folds a .js payload into prod: the variant matrix, plus
 // name/price/availability when still missing — this is also the rescue for
 // shopify pages whose HTML carries no schema.org Product (the endpoint
 // answers even when the storefront page is thin or challenge-walled).
-func (p *Pipeline) shopifyJSMerge(prod *Product, body string) {
+// Returns whether the payload contributed anything.
+func (p *Pipeline) shopifyJSMerge(prod *Product, body string) bool {
 	var jp shopifyJSProduct
 	if err := json.Unmarshal([]byte(body), &jp); err != nil {
-		return
+		return false
 	}
 	variants, best, anyStock := shopifyJSVariants(prod.URL, jp.Variants)
 	if len(variants) == 0 {
-		return
+		return false
 	}
 	prod.Variants = variants
 	if strings.TrimSpace(prod.Name) == "" && jp.Title != "" {
@@ -116,6 +200,10 @@ func (p *Pipeline) shopifyJSMerge(prod *Product, body string) {
 			prod.Availability = "out_of_stock"
 		}
 	}
+	if prod.Method == MethodSERP {
+		prod.Method = MethodShopifyJS
+	}
+	return true
 }
 
 // shopifyJSVariants maps the .js variant list to wire form, skipping

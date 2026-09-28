@@ -105,8 +105,11 @@ func TestShopifyJSRescueFetchesOnce(t *testing.T) {
 	out := p.Enrich(t.Context(), []sources.Candidate{
 		{Source: "shopify", Title: "Widget", URL: page},
 	})
-	if f.count(".js") != 1 {
-		t.Fatalf(".js fetches = %d, want 1 (jsTried dedupe)", f.count(".js"))
+	if f.count("/products/widget.js") != 1 {
+		t.Fatalf("product .js fetches = %v, want exactly 1 (jsTried dedupe)", f.seen)
+	}
+	if f.count("/cart.js") != 0 {
+		t.Fatalf("an empty merge must not trigger the currency probe: %v", f.seen)
 	}
 	if len(out[0].Product.Variants) != 0 {
 		t.Fatalf("empty variants payload must leave Variants empty: %+v", out[0].Product.Variants)
@@ -137,19 +140,26 @@ func TestShopifyJSRescueOnSerpComplete(t *testing.T) {
 	}
 }
 
-// A non-shopify page must never trigger the .js probe — the rescue is
-// gated on storefront evidence, not on "page might be a product".
-func TestShopifyJSRescueSkipsForeignPages(t *testing.T) {
+// A non-shopify host carrying the /products/<handle> shape earns exactly
+// ONE bounded probe — the 404 answers for free. A page whose path is off
+// the product shape must never be probed at all.
+func TestShopifyJSRescueProbeIsBounded(t *testing.T) {
 	page := "https://plain.example.com/products/widget"
+	other := "https://plain.example.com/collections/sale"
 	f := &routerFetcher{pages: map[string]*wowa.FetchResponse{
-		page: {Status: 200, Body: "<html><body>plain</body></html>"},
+		page:  {Status: 200, Body: "<html><body>plain</body></html>"},
+		other: {Status: 200, Body: "<html><body>plain</body></html>"},
 	}}
 	p := New(f, nil, testConfig())
 	p.Enrich(t.Context(), []sources.Candidate{
 		{Source: "web", Title: "Widget", URL: page},
+		{Source: "web", Title: "Sale", URL: other},
 	})
-	if f.count(".js") != 0 {
-		t.Fatalf(".js fetched for a non-shopify page: %v", f.seen)
+	if got := f.count("/products/widget.js"); got != 1 {
+		t.Fatalf("products-path probe count = %d, want exactly 1", got)
+	}
+	if f.count("collections") > 1 { // 1 = the page fetch itself
+		t.Fatalf("non-product path fetched a .js probe: %v", f.seen)
 	}
 }
 
@@ -230,6 +240,88 @@ func TestShopifyJSRescueOnCacheHit(t *testing.T) {
 	}
 	if len(out2[0].Product.Variants) != 3 {
 		t.Fatalf("cached product never received its variant matrix: %+v", out2[0].Product.Variants)
+	}
+}
+
+// The /products/<handle> path alone is enough suspicion: a direct
+// (product_match/watch) URL whose page fetch fails entirely still earns
+// the .js probe — the JSON asset often answers when the HTML is
+// bot-walled, rescuing name+price+variants outright (expercom case).
+func TestShopifyJSRescuesFailedPageFetch(t *testing.T) {
+	page := "https://walled.example.com/products/mbp"
+	f := &routerFetcher{pages: map[string]*wowa.FetchResponse{
+		page:         {Status: 403, Body: "<html>cf challenge</html>"},
+		page + ".js": {Status: 200, Body: shopifyJSBody},
+		// The product doc carries no currency — it is a store-level
+		// setting served by /cart.js on every shopify storefront.
+		"https://walled.example.com/cart.js": {Status: 200, Body: `{"currency":"usd"}`},
+	}}
+	p := New(f, nil, testConfig())
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		{Source: "direct", URL: page},
+	})
+	got := out[0]
+	if len(got.Product.Variants) != 3 {
+		t.Fatalf("variants = %+v", got.Product.Variants)
+	}
+	if got.Product.Name != "MacBook Pro 14 (M5 Pro)" {
+		t.Fatalf("name rescue failed: %q", got.Product.Name)
+	}
+	if got.Product.PriceMinor == nil || *got.Product.PriceMinor != 238900 {
+		t.Fatalf("price = %v, want lowest in-stock 238900", got.Product.PriceMinor)
+	}
+	if got.ExtractionFailed {
+		t.Fatalf("rescued product still failed: %s", got.FailureReason)
+	}
+}
+
+// Shopify normalizes www→apex with a 301 that wowa returns verbatim —
+// the rescue must follow that single hop (real shape: expercom).
+func TestShopifyJSFollowsHostRedirect(t *testing.T) {
+	page := "https://www.walled.example.com/products/mbp"
+	apex := "https://walled.example.com/products/mbp.js"
+	f := &routerFetcher{pages: map[string]*wowa.FetchResponse{
+		page: {Status: 403, Body: "<html>cf challenge</html>"},
+		page + ".js": {
+			Status:  301,
+			Headers: map[string]string{"Location": apex},
+		},
+		apex:                                 {Status: 200, Body: shopifyJSBody},
+		"https://walled.example.com/cart.js": {Status: 200, Body: `{"currency":"USD"}`},
+	}}
+	p := New(f, nil, testConfig())
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		{Source: "direct", URL: page},
+	})
+	got := out[0]
+	if len(got.Product.Variants) != 3 {
+		t.Fatalf("redirected .js fetch dropped the matrix: %+v", got.Product.Variants)
+	}
+	if f.count(apex) != 1 {
+		t.Fatalf("apex .js fetched %d times, want 1", f.count(apex))
+	}
+}
+
+// A redirect off the .js family is not followed — Location pointing at a
+// non-product path must not turn the probe into an arbitrary fetch.
+func TestShopifyJSRefusesForeignRedirect(t *testing.T) {
+	page := "https://walled.example.com/products/mbp"
+	f := &routerFetcher{pages: map[string]*wowa.FetchResponse{
+		page: {Status: 403, Body: "<html>cf challenge</html>"},
+		page + ".js": {
+			Status:  302,
+			Headers: map[string]string{"Location": "https://walled.example.com/cart"},
+		},
+		// Bait: following the raw Location lands here — a variant body on
+		// a non-product URL must never become the matrix.
+		"https://walled.example.com/cart": {Status: 200, Body: shopifyJSBody},
+	}}
+	p := New(f, nil, testConfig())
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		{Source: "direct", URL: page},
+	})
+	if len(out[0].Product.Variants) != 0 {
+		t.Fatalf("followed a non-.js redirect: %+v", out[0].Product.Variants)
 	}
 }
 
