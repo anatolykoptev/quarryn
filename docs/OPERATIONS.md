@@ -59,6 +59,8 @@ bearer secret.
 | `WATCH_NOTIFY_URL` | — | Webhook for watch alerts; empty = alerts fail loudly and retry |
 | `WATCH_NOTIFY_FORMAT` | `alertmanager` | Payload shape: `alertmanager` (v4) or `json` — flat body `{event, trigger, watch_id, price_minor, availability, summary, …}` for ntfy/Gotify/custom sinks |
 | `BOT_NOTIFY_URL` | — | Bot delivery endpoint — watches with `owner="tg:*"` POST their JSON alert here instead of `WATCH_NOTIFY_URL` |
+| `BOT_NOTIFY_SECRET` | — | HMAC key for the bot endpoint — signs each POST (`X-Webhook-Timestamp` + `X-Webhook-Signature-V2`, hex HMAC-SHA256 over `<unix>.<body>`; the Hermes gateway scheme) |
+| `WATCH_NOTIFY_SECRET` | — | Same HMAC signing for the generic `json` sink when it needs it |
 | `WATCH_OWNER_MAX` | `25` | Active-watch cap per tenant owner (`0` = unlimited) |
 | `TRUST_ALLOW_DOMAINS` / `TRUST_DENY_DOMAINS` | — | Domain trust overrides (CSV of base domains; deny beats allow) |
 | `TOOL_TIMEOUT` | `90s` | Default per-tool deadline |

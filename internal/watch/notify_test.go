@@ -2,7 +2,11 @@ package watch
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,7 +27,7 @@ func captureWebhook(t *testing.T) (*WebhookNotifier, *webhookPayload, *string) {
 		_ = json.NewDecoder(r.Body).Decode(got)
 	}))
 	t.Cleanup(srv.Close)
-	return NewWebhookNotifier(srv.URL), got, ct
+	return NewWebhookNotifier(srv.URL, ""), got, ct
 }
 
 // A consumer parses this body by field name — a wrong key or a missing
@@ -103,7 +107,7 @@ func TestWebhookNotifierHTTPErrorAndRetryAfter(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	n := NewWebhookNotifier(srv.URL)
+	n := NewWebhookNotifier(srv.URL, "")
 	ra, err := n.Notify(context.Background(), Watch{ID: 1, Kind: KindOffer}, Observation{Outcome: OutcomeOK}, "price")
 	if err == nil {
 		t.Fatal("expected error on HTTP 502")
@@ -155,4 +159,76 @@ type countingNotifier struct{ n *int }
 func (c *countingNotifier) Notify(context.Context, Watch, Observation, string) (time.Duration, error) {
 	*c.n++
 	return 0, nil
+}
+
+// The Hermes webhook lane authenticates by HMAC — a wrong signature is a
+// silent drop on the far end (401 before the body is even read), so the
+// notifier must emit exactly "<unix>.<body>" under X-Webhook-Signature-V2.
+func TestWebhookNotifierHMAC(t *testing.T) {
+	var body []byte
+	var gotSig, gotTS string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		gotSig = r.Header.Get("X-Webhook-Signature-V2")
+		gotTS = r.Header.Get("X-Webhook-Timestamp")
+	}))
+	t.Cleanup(srv.Close)
+
+	n := NewWebhookNotifier(srv.URL, "topsecret")
+	n.Now = func() time.Time { return time.Unix(1700000000, 0) }
+	_, err := n.Notify(context.Background(), Watch{ID: 1, Kind: KindOffer, Owner: "tg:777"},
+		Observation{Outcome: OutcomeOK}, "price")
+	if err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	if gotTS != "1700000000" {
+		t.Fatalf("timestamp header = %q", gotTS)
+	}
+	mac := hmac.New(sha256.New, []byte("topsecret"))
+	mac.Write([]byte("1700000000."))
+	mac.Write(body)
+	if gotSig != hex.EncodeToString(mac.Sum(nil)) {
+		t.Fatalf("signature mismatch: %q", gotSig)
+	}
+	// And the chat_id derivation — the sink templates {chat_id} into
+	// deliver_extra; a missing field strands the alert.
+	var parsed map[string]any
+	_ = json.Unmarshal(body, &parsed)
+	if parsed["chat_id"] != "777" {
+		t.Fatalf("chat_id = %v, want 777", parsed["chat_id"])
+	}
+}
+
+// Non-tg owners never surface as chat_id — TrimPrefix on a missing
+// prefix would pass "team:ops" through as a bogus recipient.
+func TestWebhookNotifierChatIDOnlyTelegram(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+	}))
+	t.Cleanup(srv.Close)
+	n := NewWebhookNotifier(srv.URL, "")
+	_, _ = n.Notify(context.Background(), Watch{ID: 1, Kind: KindOffer, Owner: "team:ops"},
+		Observation{Outcome: OutcomeOK}, "price")
+	var parsed map[string]any
+	_ = json.Unmarshal(body, &parsed)
+	if _, ok := parsed["chat_id"]; ok {
+		t.Fatalf("chat_id present for non-tg owner: %v", parsed["chat_id"])
+	}
+}
+
+// Unsigned default: no secret → no signature headers (ntfy/Gotify sinks
+// neither expect nor want them).
+func TestWebhookNotifierNoSecret(t *testing.T) {
+	var hdr http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hdr = r.Header
+	}))
+	t.Cleanup(srv.Close)
+	n := NewWebhookNotifier(srv.URL, "")
+	_, _ = n.Notify(context.Background(), Watch{ID: 1, Kind: KindOffer},
+		Observation{Outcome: OutcomeOK}, "price")
+	if hdr.Get("X-Webhook-Signature-V2") != "" || hdr.Get("X-Webhook-Timestamp") != "" {
+		t.Fatal("unsigned notifier must not send signature headers")
+	}
 }

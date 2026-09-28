@@ -106,7 +106,7 @@ func newWatcher(s *search.Searcher, pgdb *postgres.DB, cfg config.Config, initEr
 	case "", "alertmanager":
 		notifier = watch.NewAlertmanagerNotifier(cfg.WatchNotifyURL)
 	case "json":
-		notifier = watch.NewWebhookNotifier(cfg.WatchNotifyURL)
+		notifier = watch.NewWebhookNotifier(cfg.WatchNotifyURL, cfg.WatchNotifySecret)
 	default:
 		slog.Warn("unknown WATCH_NOTIFY_FORMAT — using alertmanager",
 			slog.String("format", cfg.WatchNotifyFormat))
@@ -116,7 +116,7 @@ func newWatcher(s *search.Searcher, pgdb *postgres.DB, cfg config.Config, initEr
 		// Bot-owned watches (owner="tg:*") alert their user through the
 		// bot endpoint; fleet watches keep the default sink.
 		notifier = watch.RoutingNotifier{
-			TG:      watch.NewWebhookNotifier(cfg.BotNotifyURL),
+			TG:      watch.NewWebhookNotifier(cfg.BotNotifyURL, cfg.BotNotifySecret),
 			Default: notifier,
 		}
 		slog.Info("watch notify: tg-owned watches route to bot", slog.String("url", cfg.BotNotifyURL))
