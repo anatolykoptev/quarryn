@@ -180,13 +180,17 @@ type webhookPayload struct {
 // without knowing the v4 envelope.
 func (n *WebhookNotifier) Notify(ctx context.Context, w Watch, obs Observation, kind string) (time.Duration, error) {
 	label := watchLabel(w)
+	chatID := ""
+	if strings.HasPrefix(w.Owner, OwnerPrefixTelegram) {
+		chatID = strings.TrimPrefix(w.Owner, OwnerPrefixTelegram)
+	}
 	body, err := json.Marshal(webhookPayload{
 		Event:            "watch_triggered",
 		Trigger:          triggerKind(kind),
 		WatchID:          w.ID,
 		Kind:             string(w.Kind),
 		Owner:            w.Owner,
-		ChatID:           strings.TrimPrefix(w.Owner, OwnerPrefixTelegram),
+		ChatID:           chatID,
 		Label:            label,
 		URL:              w.URL,
 		Query:            w.Query,

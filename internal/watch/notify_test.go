@@ -199,6 +199,24 @@ func TestWebhookNotifierHMAC(t *testing.T) {
 	}
 }
 
+// Non-tg owners never surface as chat_id — TrimPrefix on a missing
+// prefix would pass "team:ops" through as a bogus recipient.
+func TestWebhookNotifierChatIDOnlyTelegram(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+	}))
+	t.Cleanup(srv.Close)
+	n := NewWebhookNotifier(srv.URL, "")
+	_, _ = n.Notify(context.Background(), Watch{ID: 1, Kind: KindOffer, Owner: "team:ops"},
+		Observation{Outcome: OutcomeOK}, "price")
+	var parsed map[string]any
+	_ = json.Unmarshal(body, &parsed)
+	if _, ok := parsed["chat_id"]; ok {
+		t.Fatalf("chat_id present for non-tg owner: %v", parsed["chat_id"])
+	}
+}
+
 // Unsigned default: no secret → no signature headers (ntfy/Gotify sinks
 // neither expect nor want them).
 func TestWebhookNotifierNoSecret(t *testing.T) {
