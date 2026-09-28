@@ -81,13 +81,13 @@ func (s *Store) insert(ctx context.Context, q queryRower, w *Watch, crit []byte)
 		INSERT INTO watches (kind, offer_id, native_id, url, label, query,
 			criteria, target_price_minor, currency, interval_minutes,
 			expires_at, next_check_after, notify_on, target_pct,
-			condition_text, owner)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(),$12,$13,$14,$15)
+			condition_text, owner, variant_sel)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(),$12,$13,$14,$15,$16)
 		RETURNING id, created_at`,
 		w.Kind, w.OfferID, w.NativeID, w.URL, w.Label, w.Query,
 		crit, w.TargetPriceMinor, w.Currency,
 		int(w.Interval.Minutes()), w.ExpiresAt,
-		w.NotifyOn, w.TargetPct, w.ConditionText, w.Owner).
+		w.NotifyOn, w.TargetPct, w.ConditionText, w.Owner, w.VariantSel).
 		Scan(&w.ID, &w.CreatedAt)
 }
 
@@ -101,7 +101,8 @@ func (s *Store) List(ctx context.Context, owner string, includeInactive bool) ([
 		last_price_minor, last_availability, consec_failures,
 		notify_pending, last_notify_attempt_at, notified_price_minor,
 		notified_at, notify_count, notify_on, target_pct,
-		baseline_price_minor, condition_text, pending_trigger, owner
+		baseline_price_minor, condition_text, pending_trigger, owner,
+		variant_sel
 		FROM watches`
 	var args []any
 	var conds []string
@@ -143,7 +144,8 @@ func (s *Store) Get(ctx context.Context, owner string, id int64) (Watch, error) 
 			last_price_minor, last_availability, consec_failures,
 			notify_pending, last_notify_attempt_at, notified_price_minor,
 			notified_at, notify_count, notify_on, target_pct,
-			baseline_price_minor, condition_text, pending_trigger, owner
+			baseline_price_minor, condition_text, pending_trigger, owner,
+			variant_sel
 		FROM watches WHERE id=$1 AND ($2='' OR owner=$2)`, id, owner)
 	return scanWatch(row)
 }
@@ -166,7 +168,8 @@ func (s *Store) Due(ctx context.Context, limit int, now time.Time) ([]Watch, err
 			last_price_minor, last_availability, consec_failures,
 			notify_pending, last_notify_attempt_at, notified_price_minor,
 			notified_at, notify_count, notify_on, target_pct,
-			baseline_price_minor, condition_text, pending_trigger, owner
+			baseline_price_minor, condition_text, pending_trigger, owner,
+			variant_sel
 		FROM watches
 		WHERE status='active' AND expires_at > $1 AND next_check_after <= $1
 		ORDER BY next_check_after
@@ -209,7 +212,7 @@ func scanWatch(r rowScanner) (Watch, error) {
 		&w.LastAvailability, &w.ConsecFailures, &w.NotifyPending,
 		&w.LastNotifyAttemptAt, &w.NotifiedPriceMinor, &w.NotifiedAt,
 		&w.NotifyCount, &w.NotifyOn, &w.TargetPct, &w.BaselineMinor,
-		&w.ConditionText, &w.PendingTrigger, &w.Owner)
+		&w.ConditionText, &w.PendingTrigger, &w.Owner, &w.VariantSel)
 	if err != nil {
 		return w, err
 	}

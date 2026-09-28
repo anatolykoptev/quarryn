@@ -24,6 +24,13 @@ an outbound hop resolved (deal aggregators like slickdeals), else the
 listing URL. `source_url` keeps the originating listing when they differ;
 `buy_url` mirrors the resolved merchant URL for compatibility.
 
+Optioned/configurator listings add `variants[]` — the purchasable
+configuration matrix (option label, `variant_id`, decimal `price`,
+`available`, deep-link `url` with the variant preselected). In-stock
+first, capped at 40; absent on single-variant listings. Shopify pages get
+the matrix from the deterministic `/products/<handle>.js` mirror; other
+stores from schema.org `ProductGroup.hasVariant` or adapter metadata.
+
 ### `product_match`
 
 Judge one caller-supplied product URL through the same extract+match path.
@@ -51,6 +58,7 @@ Price/restock watches on Postgres. `action`: `add | list | get | cancel | check_
 |---|---|---|
 | `kind` | `offer|query` | `offer` re-fetches one pinned URL; `query` re-runs search and takes the cheapest passed offer in `currency` |
 | `url` / `offer_id` | string | `add kind=offer`: page to re-fetch; `offer_id` optional stable id |
+| `variant` | string | `add kind=offer` only: pin one configuration — variant id or option-title substring (`"64GB"`). The observer follows that variant's price/availability/URL; a selector matching nothing fails closed (`no_offers`), never watches the wrong SKU |
 | `query` / `criteria` | string / string[] | `add kind=query`: search text + criteria |
 | `label` | string | Human name for notifications |
 | `notify_on` | `price\|restock\|any` | Default `price`. `restock` fires on unbuyable→buyable transitions (`out_of_stock\|discontinued` → any orderable state); `any` = either trigger |

@@ -76,9 +76,14 @@ type Watch struct {
 	OfferID   string // codec identity (url|… fallback allowed)
 	NativeID  bool   // offer_id carries a native listing id
 	URL       string // offer: re-fetch target; query: last winner
-	Label     string
-	Query     string
-	Criteria  []string
+	// VariantSel pins one configuration of the listing's variant matrix
+	// (issue #115): a variant id or an option-title substring like
+	// "64GB". Offer-kind only; empty = the listing's default
+	// (min-price in-stock) observation.
+	VariantSel string
+	Label      string
+	Query      string
+	Criteria   []string
 	// Triggers — at least one applies (SQL CHECK): absolute price target,
 	// percent-drop from baseline, or a notify_on mode that includes
 	// restock. TargetPriceMinor is nil for pct-only and pure restock

@@ -215,3 +215,24 @@ func TestSchemaProductGroupVariants(t *testing.T) {
 		t.Fatalf("rating = %v", p.Rating)
 	}
 }
+
+// Issue #115: hasVariant items also populate the variant matrix — option
+// label from name, id from sku, per-variant offer state.
+func TestSchemaProductGroupVariantMatrix(t *testing.T) {
+	p, err := productFromSchema([]byte(productGroupHTML), "https://shop.example.com/products/mens-strider-explore")
+	if err != nil {
+		t.Fatalf("productFromSchema: %v", err)
+	}
+	if len(p.Variants) != 2 {
+		t.Fatalf("variants = %+v", p.Variants)
+	}
+	v := p.Variants[0]
+	if v.Title != "Men's Strider Explore - Natural Black - Size 8" ||
+		v.VariantID != "A11768M080" || v.Price != "98.00" ||
+		v.Available == nil || !*v.Available {
+		t.Fatalf("variant 0 = %+v", v)
+	}
+	if v := p.Variants[1]; v.Available == nil || *v.Available {
+		t.Fatalf("out-of-stock variant mapped available: %+v", v)
+	}
+}

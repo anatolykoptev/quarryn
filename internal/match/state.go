@@ -1,6 +1,7 @@
 package match
 
 import (
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/anatolykoptev/quarryn/internal/extract"
@@ -15,6 +16,8 @@ const (
 	maxStateBlurbLen  = 500 // runes — mirrors extract.PublicBlurbMax
 	maxStateTokenLen  = 64  // runes; currency/availability/condition tokens
 	maxStateDomainLen = 253 // runes; DNS name cap
+	maxStateVariants  = 40  // mirrors extract.PublicVariantMax
+	maxStateVariantLn = 160 // runes; one "options | price | stock" line
 )
 
 // CandidateState is the ONLY shape the jeff adapter accepts as question
@@ -32,6 +35,11 @@ type CandidateState struct {
 	Rating       *float64 `json:"rating,omitempty"`
 	SourceDomain string   `json:"source_domain,omitempty"`
 	Blurb        string   `json:"blurb,omitempty"`
+	// Variants renders the purchasable-config matrix as compact
+	// "title | price | availability" lines (issue #115) — the judge checks
+	// spec criteria (RAM/storage/chip) against real option labels instead
+	// of guessing from the product title. Capped at maxStateVariants.
+	Variants []string `json:"variants,omitempty"`
 }
 
 // NewCandidateState builds the jeff-bound state from the egress-safe
@@ -47,7 +55,39 @@ func NewCandidateState(p extract.PublicProduct) CandidateState {
 		Rating:       p.Rating,
 		SourceDomain: clipText(p.Source, maxStateDomainLen),
 		Blurb:        clipText(p.DescriptionBlurb, maxStateBlurbLen),
+		Variants:     variantLines(p),
 	}
+}
+
+// variantLines renders each egress variant as one compact state line.
+// Price carries the product's currency when known so "3529" is not
+// ambiguous; absent availability is omitted, never fabricated.
+func variantLines(p extract.PublicProduct) []string {
+	if len(p.Variants) == 0 {
+		return nil
+	}
+	out := make([]string, 0, min(len(p.Variants), maxStateVariants))
+	for _, v := range p.Variants {
+		if len(out) == maxStateVariants {
+			break
+		}
+		// The title is clipped before the suffixes are appended — clipping
+		// the assembled line would silently eat " | price | stock" when a
+		// merchant ships a 300-char option label.
+		line := clipText(v.Title, maxStateVariantLn-40)
+		if v.Price != nil {
+			line += " | " + strconv.FormatFloat(*v.Price, 'f', -1, 64) + " " + p.Currency
+		}
+		if v.Available != nil {
+			if *v.Available {
+				line += " | in_stock"
+			} else {
+				line += " | out_of_stock"
+			}
+		}
+		out = append(out, clipText(line, maxStateVariantLn))
+	}
+	return out
 }
 
 // clipText replaces ASCII control characters (including \r, \n and DEL)

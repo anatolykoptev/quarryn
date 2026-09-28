@@ -2,9 +2,13 @@ package watch
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
 	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/money"
 	"github.com/anatolykoptev/quarryn/internal/search"
+	"github.com/anatolykoptev/quarryn/internal/sources"
 )
 
 // Observer turns a Watch into an Observation by re-fetching through the
@@ -48,6 +52,9 @@ func (o *SearcherObserver) observeOffer(ctx context.Context, w Watch) Observatio
 			Detail:  "fetched but no product extracted — listing may be gone",
 		}
 	}
+	if w.VariantSel != "" {
+		return observeVariant(w, p)
+	}
 	offerURL := p.BuyURL
 	if offerURL == "" {
 		offerURL = w.URL
@@ -60,6 +67,66 @@ func (o *SearcherObserver) observeOffer(ctx context.Context, w Watch) Observatio
 		PriceMinor:   p.PriceMinor,
 		Currency:     cur,
 		Availability: p.Availability,
+		OfferURL:     offerURL,
+		OfferID:      w.OfferID,
+		Outcome:      OutcomeOK,
+		Product:      p,
+	}
+}
+
+// observeVariant resolves the watch's pinned configuration inside the
+// extracted variant matrix (issue #115). Fail-closed: a selector that
+// matches nothing is a no_offers observation — never a silent fallthrough
+// to the listing's min-price SKU, which would watch the wrong product.
+func observeVariant(w Watch, p *extract.Product) Observation {
+	sel := strings.TrimSpace(w.VariantSel)
+	var v *sources.Variant
+	for i := range p.Variants {
+		cand := &p.Variants[i]
+		if cand.VariantID == sel ||
+			strings.Contains(strings.ToLower(cand.Title), strings.ToLower(sel)) {
+			v = cand
+			break
+		}
+	}
+	if v == nil {
+		return Observation{
+			Outcome: OutcomeNoOffers,
+			Detail:  "variant " + strconv.Quote(sel) + " not in listing matrix",
+		}
+	}
+	cur := p.Currency
+	if v.Currency != "" {
+		cur = v.Currency
+	}
+	if cur == "" {
+		cur = w.Currency
+	}
+	var price *int64
+	if v.Price != "" && cur != "" {
+		if minor, ok := money.ToMinor(v.Price, cur); ok {
+			price = &minor
+		}
+	}
+	avail := p.Availability
+	if v.Available != nil {
+		if *v.Available {
+			avail = "in_stock"
+		} else {
+			avail = "out_of_stock"
+		}
+	}
+	offerURL := v.URL
+	if offerURL == "" && v.VariantID != "" {
+		offerURL = w.URL + "?variant=" + v.VariantID
+	}
+	if offerURL == "" {
+		offerURL = w.URL
+	}
+	return Observation{
+		PriceMinor:   price,
+		Currency:     cur,
+		Availability: avail,
 		OfferURL:     offerURL,
 		OfferID:      w.OfferID,
 		Outcome:      OutcomeOK,

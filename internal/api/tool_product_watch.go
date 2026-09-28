@@ -38,6 +38,7 @@ type watchArgs struct {
 	WatchID  int64    `json:"watch_id,omitempty" jsonschema:"watch id for get/cancel/check_now"`
 	URL      string   `json:"url,omitempty" jsonschema:"offer: page to re-fetch"`
 	OfferID  string   `json:"offer_id,omitempty" jsonschema:"offer: stable id from a search result (optional)"`
+	Variant  string   `json:"variant,omitempty" jsonschema:"offer: pin one configuration — variant id or option substring like \"64GB\"; observer follows its price, not the listing min"`
 	Query    string   `json:"query,omitempty" jsonschema:"query: search text"`
 	Criteria []string `json:"criteria,omitempty" jsonschema:"query: product_search criteria"`
 	Label    string   `json:"label,omitempty" jsonschema:"human name for notifications"`
@@ -73,6 +74,7 @@ type watchEntry struct {
 	Status           string         `json:"status"`
 	URL              string         `json:"url,omitempty"`
 	OfferID          string         `json:"offer_id,omitempty"`
+	VariantSel       string         `json:"variant,omitempty"`
 	NativeID         bool           `json:"native_id,omitempty"`
 	Query            string         `json:"query,omitempty"`
 	Criteria         []string       `json:"criteria,omitempty"`
@@ -122,6 +124,7 @@ func toWatchEntry(w watch.Watch) watchEntry {
 		Status:           w.Status,
 		URL:              w.URL,
 		OfferID:          w.OfferID,
+		VariantSel:       w.VariantSel,
 		NativeID:         w.NativeID,
 		Query:            w.Query,
 		Criteria:         w.Criteria,
@@ -178,6 +181,9 @@ func (d deps) watchAdd(ctx context.Context, args watchArgs) watchOut {
 	// false restocks (Devin Review #101). DB enforces the same shape.
 	if args.Kind == string(watch.KindQuery) && w.NotifyOn != watch.NotifyPrice {
 		return watchOut{Error: "notify_on=" + w.NotifyOn + " requires kind=offer — a restock transition needs a stable listing, query watches take price triggers"}
+	}
+	if args.Kind == string(watch.KindQuery) && strings.TrimSpace(args.Variant) != "" {
+		return watchOut{Error: "variant requires kind=offer — query watches re-pick the cheapest offer each check"}
 	}
 	switch args.Kind {
 	case string(watch.KindOffer):
@@ -285,6 +291,12 @@ func watchAddOffer(ctx context.Context, args watchArgs, w *watch.Watch) string {
 	}
 	w.Kind = watch.KindOffer
 	w.URL = args.URL
+	if sel := strings.TrimSpace(args.Variant); sel != "" {
+		if n := utf8.RuneCountInString(sel); n > 200 {
+			return "variant too long (max 200 runes)"
+		}
+		w.VariantSel = sel
+	}
 	if args.OfferID != "" {
 		head, _, ok := sources.ParseOfferID(args.OfferID)
 		if !ok {

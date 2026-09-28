@@ -29,6 +29,11 @@ type Candidate struct {
 	Thumbs       *int     `json:"thumbs,omitempty"`
 	ImageURL     string   `json:"image_url,omitempty"`
 
+	// Variants is the purchasable-configuration matrix when the listing is
+	// a configurator/optioned product (issue #115). Adapter-emitted, wire
+	// order preserved (in-stock first); nil on single-variant listings.
+	Variants []Variant `json:"variants,omitempty"`
+
 	// Metadata carries adapter-specific keys with no Candidate field
 	// (buying_options, merchant, listing_id, ...) plus lifted keys whose
 	// values failed to decode — a malformed upstream price must not
@@ -48,6 +53,7 @@ var liftedKeys = map[string]struct{}{
 	MetaDiscountPct:  {},
 	MetaThumbs:       {},
 	MetaImageURL:     {},
+	MetaVariants:     {},
 }
 
 // candidateFromResult decodes a funnel-merged Result into a Candidate.
@@ -87,6 +93,13 @@ func candidateFromResult(r sources.Result) Candidate {
 			c.Thumbs = &v
 		} else {
 			decodeFailed[MetaThumbs] = struct{}{}
+		}
+	}
+	if s := r.Metadata[MetaVariants]; s != "" {
+		if v := DecodeVariants(s); len(v) > 0 {
+			c.Variants = v
+		} else {
+			decodeFailed[MetaVariants] = struct{}{}
 		}
 	}
 	for k, v := range r.Metadata {

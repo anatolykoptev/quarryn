@@ -12,6 +12,8 @@ package extract
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 
 	"github.com/anatolykoptev/quarryn/internal/money"
 	"github.com/anatolykoptev/quarryn/internal/sources"
@@ -58,8 +60,19 @@ type Product struct {
 	// followed a deal aggregator's outbound tracker (slickdeals /click).
 	// Distinct from URL (the listing/thread address) — this is where the
 	// item is actually purchased.
-	BuyURL string          `json:"buy_url,omitempty"`
-	Raw    json.RawMessage `json:"raw,omitempty"`
+	BuyURL string `json:"buy_url,omitempty"`
+	// Variants is the purchasable-configuration matrix when the listing is
+	// an optioned/configurator product (issue #115): adapter-emitted wire
+	// variants, schema.org hasVariant entries, or a Shopify .js rescue
+	// fetch. Empty on single-variant listings.
+	Variants []sources.Variant `json:"variants,omitempty"`
+	Raw      json.RawMessage   `json:"raw,omitempty"`
+
+	// jsTried marks a product whose /products/<handle>.js mirror was
+	// already fetched this enrichment — the two rescue call sites share
+	// the flag so a variant-less .js answer never triggers a retry
+	// (unexported: internal state, never serialized or cached).
+	jsTried bool
 }
 
 // EnrichedCandidate is the stage output: the sourced candidate plus its
@@ -111,6 +124,24 @@ type PublicProduct struct {
 	Source           string   `json:"source"`
 	OfferID          string   `json:"offer_id,omitempty"`
 	DescriptionBlurb string   `json:"description_blurb,omitempty"`
+	// Variants exposes the purchasable configs (issue #115) — the option
+	// label, decimal price and availability, no seller-identifying text.
+	// Capped at PublicVariantMax, in-stock first.
+	Variants []PublicVariant `json:"variants,omitempty"`
+}
+
+// PublicVariantMax bounds the egress variant list — configurator pages
+// can carry 100+ SKUs; past that the tail is padding, not information.
+const PublicVariantMax = 40
+
+// PublicVariant is the egress-safe variant view. Price stays decimal —
+// the listing's currency lives on the parent product.
+type PublicVariant struct {
+	Title     string   `json:"title"`
+	VariantID string   `json:"variant_id,omitempty"`
+	Price     *float64 `json:"price,omitempty"`
+	Available *bool    `json:"available,omitempty"`
+	URL       string   `json:"url,omitempty"`
 }
 
 // ProductPublic returns the egress-safe projection of p: the allow-listed
@@ -128,7 +159,56 @@ func (p Product) ProductPublic() PublicProduct {
 		Source:           p.Source,
 		OfferID:          p.OfferID,
 		DescriptionBlurb: sanitizeBlurb(p.Description),
+		Variants:         publicVariants(p.Variants),
 	}
+}
+
+// publicVariants projects the wire variants into the egress shape:
+// in-stock first, clipped titles, capped at PublicVariantMax.
+func publicVariants(vs []sources.Variant) []PublicVariant {
+	if len(vs) == 0 {
+		return nil
+	}
+	in, out := splitVariantsAvailable(vs)
+	ordered := append(in, out...)
+	if len(ordered) > PublicVariantMax {
+		ordered = ordered[:PublicVariantMax]
+	}
+	out2 := make([]PublicVariant, 0, len(ordered))
+	for _, v := range ordered {
+		out2 = append(out2, PublicVariant{
+			Title:     sanitizeBlurb(v.Title),
+			VariantID: v.VariantID,
+			Price:     variantPrice(v),
+			Available: v.Available,
+			URL:       v.URL,
+		})
+	}
+	return out2
+}
+
+func splitVariantsAvailable(vs []sources.Variant) (in, out []sources.Variant) {
+	for _, v := range vs {
+		if v.Available != nil && !*v.Available {
+			out = append(out, v)
+			continue
+		}
+		in = append(in, v)
+	}
+	return in, out
+}
+
+// variantPrice parses the wire decimal price to a float for egress; a
+// missing/unparseable price stays nil — never clamped.
+func variantPrice(v sources.Variant) *float64 {
+	if v.Price == "" {
+		return nil
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(v.Price), 64)
+	if err != nil {
+		return nil
+	}
+	return &f
 }
 
 // ProductPublic is the same projection for the enriched record — the field
