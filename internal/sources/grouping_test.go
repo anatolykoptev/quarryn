@@ -6,8 +6,13 @@ func TestDistinctVariantSKU(t *testing.T) {
 	if got := distinctVariantSKU([]shopifyVariant{{SKU: " A1 "}}); got != "A1" {
 		t.Fatalf("single = %q", got)
 	}
-	if got := distinctVariantSKU([]shopifyVariant{{SKU: "A1"}, {SKU: "A1"}, {}}); got != "A1" {
+	if got := distinctVariantSKU([]shopifyVariant{{SKU: "A1"}, {SKU: "A1"}}); got != "A1" {
 		t.Fatalf("shared = %q", got)
+	}
+	// A code-less variant means the SKU is per-configuration, not
+	// product-level — no promotion (review finding).
+	if got := distinctVariantSKU([]shopifyVariant{{SKU: "A1"}, {}}); got != "" {
+		t.Fatalf("partial coverage promoted: %q", got)
 	}
 	if got := distinctVariantSKU([]shopifyVariant{{SKU: "A1-64"}, {SKU: "A1-128"}}); got != "" {
 		t.Fatalf("per-variant codes must not become product sku: %q", got)

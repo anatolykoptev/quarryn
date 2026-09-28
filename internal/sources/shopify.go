@@ -281,21 +281,20 @@ func shopifyResult(shop string, p shopifyProduct) sources.Result {
 }
 
 // distinctVariantSKU returns the merchant SKU only when it names the whole
-// product — a single variant, or every variant carrying the same code.
-// Per-configuration SKUs are variant identity, not product identity, and
-// must not seed cross-store grouping (issue #98).
+// product — every variant carrying the identical non-empty code. A variant
+// without a code, or any divergence, means per-configuration identity:
+// promoting it would group the whole listing under one config's SKU and
+// let best_offer crown a different configuration's price (issue #98).
 func distinctVariantSKU(vs []shopifyVariant) string {
-	sku := ""
-	for _, v := range vs {
-		s := strings.TrimSpace(v.SKU)
-		if s == "" {
-			continue
-		}
-		if sku == "" {
-			sku = s
-			continue
-		}
-		if s != sku {
+	if len(vs) == 0 {
+		return ""
+	}
+	sku := strings.TrimSpace(vs[0].SKU)
+	if sku == "" {
+		return ""
+	}
+	for _, v := range vs[1:] {
+		if strings.TrimSpace(v.SKU) != sku {
 			return ""
 		}
 	}

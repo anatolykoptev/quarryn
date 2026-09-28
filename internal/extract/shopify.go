@@ -269,20 +269,19 @@ func shopifyJSFill(prod *Product, jp *shopifyJSProduct, best *int64, anyStock bo
 }
 
 // distinctJSSKU mirrors sources' rule: a SKU names the product only when
-// one distinct non-empty code covers every variant — per-configuration
-// codes are variant identity, not groupable product identity (#98).
+// every variant carries the identical non-empty code. Any code-less or
+// divergent variant is per-configuration identity — promoting it would
+// group the listing under one config's code (#98).
 func distinctJSSKU(vs []shopifyJSVariant) string {
-	sku := ""
-	for _, v := range vs {
-		s := strings.TrimSpace(v.SKU)
-		if s == "" {
-			continue
-		}
-		if sku == "" {
-			sku = s
-			continue
-		}
-		if s != sku {
+	if len(vs) == 0 {
+		return ""
+	}
+	sku := strings.TrimSpace(vs[0].SKU)
+	if sku == "" {
+		return ""
+	}
+	for _, v := range vs[1:] {
+		if strings.TrimSpace(v.SKU) != sku {
 			return ""
 		}
 	}
