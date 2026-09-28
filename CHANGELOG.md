@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.1](https://github.com/anatolykoptev/quarryn/compare/v1.24.0...v1.24.1) (2026-09-28)
+
+
+### Fixed
+
+* **watch:** never observe a cached price — fresh reads for freshness-critical calls ([#126](https://github.com/anatolykoptev/quarryn/issues/126)) ([ff5e505](https://github.com/anatolykoptev/quarryn/commit/ff5e505afbd45444a121b76c709bd33e76e0c874))
+
 ## [1.24.0](https://github.com/anatolykoptev/quarryn/compare/v1.23.2...v1.24.0) (2026-09-28)
 
 
