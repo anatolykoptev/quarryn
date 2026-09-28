@@ -28,7 +28,7 @@ import (
 // via -ldflags -X when the build context has a usable .git (plain checkout).
 // Dozor worktree builds carry only a .git pointer file, so git describe fails
 // there and this constant is what /healthz reports.
-var version = "1.23.0" // x-release-please-version
+var version = "1.23.1" // x-release-please-version
 
 func main() {
 	cfg := config.Load()
