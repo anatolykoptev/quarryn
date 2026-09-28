@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.0](https://github.com/anatolykoptev/quarryn/compare/v1.22.0...v1.23.0) (2026-09-28)
+
+
+### Added
+
+* variant matrix end-to-end — judge context, results, watch pinning ([#115](https://github.com/anatolykoptev/quarryn/issues/115)) ([#116](https://github.com/anatolykoptev/quarryn/issues/116)) ([9e5ae4e](https://github.com/anatolykoptev/quarryn/commit/9e5ae4e035aa65c225dc6a40eb22078e6c29f029))
+
 ## [1.22.0](https://github.com/anatolykoptev/quarryn/compare/v1.21.0...v1.22.0) (2026-09-28)
 
 
