@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/anatolykoptev/quarryn/compare/v1.19.0...v1.20.0) (2026-09-28)
+
+
+### Added
+
+* **watch,orders:** tenant owner scoping + tg-routed alerts ([#106](https://github.com/anatolykoptev/quarryn/issues/106)) ([b3eef40](https://github.com/anatolykoptev/quarryn/commit/b3eef40a1cd93b4e33ffeef4da565a28cdbdfd1f))
+
 ## [1.19.0](https://github.com/anatolykoptev/quarryn/compare/v1.18.1...v1.19.0) (2026-09-27)
 
 
