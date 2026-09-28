@@ -3,6 +3,9 @@ package watch
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -136,15 +139,19 @@ func triggerKind(kind string) string {
 // standalone-user sink (ntfy/Gotify/custom) that doesn't assume a fleet
 // Alertmanager (issue #99). Same at-least-once semantics: a transport or
 // HTTP>=400 failure leaves the alert pending and the checker retries.
+// hmacSecret signs the body when set — X-Webhook-Timestamp +
+// X-Webhook-Signature-V2 over "<ts>.<body>", the scheme the Hermes
+// gateway webhook platform validates (bot delivery lane).
 type WebhookNotifier struct {
 	URL    string
+	Secret string
 	Client *http.Client
 	Now    func() time.Time // test seam
 }
 
-// NewWebhookNotifier builds the notifier.
-func NewWebhookNotifier(url string) *WebhookNotifier {
-	return &WebhookNotifier{URL: url, Client: &http.Client{Timeout: 15 * time.Second}, Now: time.Now}
+// NewWebhookNotifier builds the notifier; hmacSecret "" = unsigned.
+func NewWebhookNotifier(url, hmacSecret string) *WebhookNotifier {
+	return &WebhookNotifier{URL: url, Secret: hmacSecret, Client: &http.Client{Timeout: 15 * time.Second}, Now: time.Now}
 }
 
 type webhookPayload struct {
@@ -152,7 +159,8 @@ type webhookPayload struct {
 	Trigger          string `json:"trigger"`
 	WatchID          int64  `json:"watch_id"`
 	Kind             string `json:"kind"`
-	Owner            string `json:"owner,omitempty"` // tg:<chat_id> — the sink resolves the recipient
+	Owner            string `json:"owner,omitempty"`   // tg:<chat_id> — the sink resolves the recipient
+	ChatID           string `json:"chat_id,omitempty"` // owner sans tg: — hermes webhook deliver_extra template
 	Label            string `json:"label,omitempty"`
 	URL              string `json:"url,omitempty"`
 	Query            string `json:"query,omitempty"`
@@ -178,6 +186,7 @@ func (n *WebhookNotifier) Notify(ctx context.Context, w Watch, obs Observation, 
 		WatchID:          w.ID,
 		Kind:             string(w.Kind),
 		Owner:            w.Owner,
+		ChatID:           strings.TrimPrefix(w.Owner, OwnerPrefixTelegram),
 		Label:            label,
 		URL:              w.URL,
 		Query:            w.Query,
@@ -199,6 +208,16 @@ func (n *WebhookNotifier) Notify(ctx context.Context, w Watch, obs Observation, 
 		return 0, err
 	}
 	req.Header.Set("content-type", "application/json")
+	if n.Secret != "" {
+		// Hermes-style HMAC-V2: hex(HMAC-SHA256(secret, "<unix>.<body>")).
+		ts := strconv.FormatInt(n.Now().Unix(), 10)
+		mac := hmac.New(sha256.New, []byte(n.Secret))
+		mac.Write([]byte(ts))
+		mac.Write([]byte("."))
+		mac.Write(body)
+		req.Header.Set("X-Webhook-Timestamp", ts)
+		req.Header.Set("X-Webhook-Signature-V2", hex.EncodeToString(mac.Sum(nil)))
+	}
 	resp, err := n.Client.Do(req)
 	if err != nil {
 		return 0, err

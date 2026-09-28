@@ -96,6 +96,10 @@ type Config struct {
 	// owner="tg:*" route their alerts there instead of WATCH_NOTIFY_URL.
 	WatchOwnerMax int
 	BotNotifyURL  string
+	// BotNotifySecret HMAC-signs bot webhook posts (Hermes V2 scheme);
+	// WatchNotifySecret does the same for the generic json sink.
+	BotNotifySecret   string
+	WatchNotifySecret string
 
 	// ToolTimeout is the default per-tool deadline; SearchToolTimeout and
 	// MatchToolTimeout override it for the product_search / product_match
@@ -149,6 +153,8 @@ func Load() Config {
 		WatchNotifyFormat: env.Str("WATCH_NOTIFY_FORMAT", "alertmanager"),
 		WatchOwnerMax:     env.Int("WATCH_OWNER_MAX", 25),
 		BotNotifyURL:      env.Str("BOT_NOTIFY_URL", ""),
+		BotNotifySecret:   env.Str("BOT_NOTIFY_SECRET", ""),
+		WatchNotifySecret: env.Str("WATCH_NOTIFY_SECRET", ""),
 		WatchTick:         env.Duration("WATCH_TICK", 15*time.Minute),
 		WatchMaxPerTick:   env.Int("WATCH_MAX_PER_TICK", 10),
 		ToolTimeout:       env.Duration("TOOL_TIMEOUT", 90*time.Second),

@@ -65,7 +65,10 @@ payload — `alertmanager` (v4 webhook, `trigger` label `price`/`restock`) or
 `json` (flat body: `event`, `trigger`, `watch_id`, `price_minor`,
 `availability`, `summary`, …) for generic sinks like ntfy or Gotify.
 Watches with `owner="tg:*"` route to `BOT_NOTIFY_URL` instead —
-the bot endpoint that delivers to the right chat. Offers
+the bot endpoint that delivers to the right chat. The payload adds
+`chat_id` (owner sans the `tg:` prefix) so the sink templates the
+recipient directly; `BOT_NOTIFY_SECRET` enables HMAC-V2 signing
+(`X-Webhook-Signature-V2` + `X-Webhook-Timestamp` over `<unix>.<body>`). Offers
 that stop being extractable become `unverifiable` after repeated failures
 and stop consuming budget. A `condition` whose evaluator is unreachable or
 rejects the observation fails closed — the check records the reason and
