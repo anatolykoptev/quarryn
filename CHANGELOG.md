@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.0](https://github.com/anatolykoptev/quarryn/compare/v1.23.2...v1.24.0) (2026-09-28)
+
+
+### Added
+
+* **match:** deterministic spec checks — sizes and chip tiers parsed out of free-text criteria ([#124](https://github.com/anatolykoptev/quarryn/issues/124)) ([40ad62e](https://github.com/anatolykoptev/quarryn/commit/40ad62e685ced3fc1654413b70ab33e4db73ca9d))
+
 ## [1.23.2](https://github.com/anatolykoptev/quarryn/compare/v1.23.1...v1.23.2) (2026-09-28)
 
 
