@@ -4,6 +4,8 @@ import (
 	"context"
 
 	mcpserver "github.com/anatolykoptev/go-mcpserver"
+	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/group"
 	"github.com/anatolykoptev/quarryn/internal/rank"
 	"github.com/anatolykoptev/quarryn/internal/trust"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -62,8 +64,84 @@ func handleProductSearch(ctx context.Context, d deps, in productSearchInput) (*m
 		resp.Results = append(resp.Results, project(r, d.trust))
 	}
 	resp.Brief = composeBrief(in.Query, out.Plan, ranked, out.Sources, d.trust)
-	resp.Groups = buildGroups(resp.Results)
+	if d.grouper != nil {
+		assigns := d.grouper.Assign(ctx, productsOf(ranked[:len(resp.Results)]))
+		applyAssignments(resp.Results, assigns)
+		resp.Groups = buildAssignedGroups(resp.Results)
+	} else {
+		resp.Groups = buildGroups(resp.Results)
+	}
 	return jsonResult(resp)
+}
+
+// productsOf maps ranked results to their extract.Products — the
+// assigner's input stays index-aligned with resp.Results.
+func productsOf(rs []rank.Result) []extract.Product {
+	out := make([]extract.Product, len(rs))
+	for i := range rs {
+		out[i] = rs[i].Judged.Product
+	}
+	return out
+}
+
+// applyAssignments writes the durable group identity onto each result.
+func applyAssignments(results []productResult, assigns []group.Assignment) {
+	for i := range results {
+		if i < len(assigns) && assigns[i].GroupID > 0 {
+			results[i].GroupID = assigns[i].GroupID
+		}
+	}
+}
+
+// buildAssignedGroups clusters results by their persisted group id —
+// the embedding-tier counterpart of buildGroups. A group surfaces a
+// "key" when any member carried an exact identifier (the claim it was
+// resolved under), and match="exact" marks that provenance; pure
+// vector-matched groups report match="embedding" and no key.
+func buildAssignedGroups(results []productResult) []productGroup {
+	byID := make(map[int64][]productResult)
+	var order []int64
+	for _, r := range results {
+		if r.GroupID == 0 {
+			continue
+		}
+		if _, seen := byID[r.GroupID]; !seen {
+			order = append(order, r.GroupID)
+		}
+		byID[r.GroupID] = append(byID[r.GroupID], r)
+	}
+	var groups []productGroup
+	for _, id := range order {
+		members := byID[id]
+		stores := make(map[string]struct{}, len(members))
+		g := productGroup{ID: id}
+		for _, m := range members {
+			stores[m.Source] = struct{}{}
+			if g.Key == "" {
+				g.Key = m.GroupKey
+			}
+			if m.GroupKey != "" {
+				g.Match = "exact"
+			}
+			g.Offers = append(g.Offers, groupOffer{
+				URL:          m.URL,
+				Source:       m.Source,
+				PriceMinor:   m.PriceMinor,
+				Currency:     m.Currency,
+				Availability: m.Availability,
+				Passed:       m.Passed,
+			})
+		}
+		if len(stores) < 2 {
+			continue
+		}
+		if g.Match == "" {
+			g.Match = "embedding"
+		}
+		g.BestOffer = bestOffer(g.Offers)
+		groups = append(groups, g)
+	}
+	return groups
 }
 
 // project maps one ranked candidate to the egress-safe result shape.

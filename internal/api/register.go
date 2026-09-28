@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/anatolykoptev/quarryn/internal/config"
+	"github.com/anatolykoptev/quarryn/internal/group"
 	"github.com/anatolykoptev/quarryn/internal/probe"
 	"github.com/anatolykoptev/quarryn/internal/rank"
 	"github.com/anatolykoptev/quarryn/internal/search"
@@ -43,7 +44,11 @@ type deps struct {
 	watchStore watchStorer
 	checker    *watch.Checker
 	orderStore orderStorer
-	initErr    error
+	// grouper is the durable product-identity assigner (issue #98
+	// embedding tier); nil when GROUPS_DATABASE_URL is unset — grouping
+	// then stays ephemeral exact-only via buildGroups.
+	grouper *group.Assigner
+	initErr error
 	// watchOwnerMax caps active watches per tenant owner (public-bot
 	// abuse bound); 0 = unlimited.
 	watchOwnerMax int
@@ -59,7 +64,7 @@ type deps struct {
 // RESTBridge auto-exposes the tools under /api/tools/*; the feedback tool
 // additionally answers on POST /api/v1/feedback (registered in main.go,
 // same store).
-func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, feedback *FeedbackStore, prober *probe.Runner, watchStore watchStorer, checker *watch.Checker, orderStore orderStorer, initErr error) {
+func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, feedback *FeedbackStore, prober *probe.Runner, watchStore watchStorer, checker *watch.Checker, orderStore orderStorer, grouper *group.Assigner, initErr error) {
 	d := deps{
 		searcher: searcher,
 		weights: rank.Weights{
@@ -77,6 +82,7 @@ func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config
 		// "unavailable" forever (the REST ingest twin takes the store
 		// directly, which is why the gap went unnoticed).
 		orderStore:    orderStore,
+		grouper:       grouper,
 		watchOwnerMax: cfg.WatchOwnerMax,
 		initErr:       initErr,
 	}

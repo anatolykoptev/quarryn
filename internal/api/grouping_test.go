@@ -61,6 +61,46 @@ func TestBuildGroupsMixedCurrencyNoBest(t *testing.T) {
 	}
 }
 
+func TestBuildAssignedGroupsByID(t *testing.T) {
+	// Persistent-id path: a keyed offer and a vector-matched offer share
+	// one group id — the group reports the exact provenance + its key.
+	results := []productResult{
+		{URL: "https://a.com/1", GroupKey: "gtin:4006381333931", GroupID: 7, Passed: true,
+			PublicProduct: extract.PublicProduct{Source: "a.com", PriceMinor: int64p(27900), Currency: "USD"}},
+		{URL: "https://b.com/2", GroupID: 7, Passed: true,
+			PublicProduct: extract.PublicProduct{Source: "b.com", PriceMinor: int64p(25199), Currency: "USD"}},
+		{URL: "https://c.com/3", GroupID: 9, Passed: true,
+			PublicProduct: extract.PublicProduct{Source: "c.com"}},
+	}
+	groups := buildAssignedGroups(results)
+	if len(groups) != 1 {
+		t.Fatalf("groups = %d, want 1", len(groups))
+	}
+	g := groups[0]
+	if g.ID != 7 || g.Key != "gtin:4006381333931" || g.Match != "exact" {
+		t.Fatalf("group = %+v", g)
+	}
+	if g.BestOffer == nil || *g.BestOffer.PriceMinor != 25199 {
+		t.Fatalf("best = %+v", g.BestOffer)
+	}
+}
+
+func TestBuildAssignedGroupsEmbeddingMatch(t *testing.T) {
+	// Pure embedding-tier group: no member carried an identifier.
+	results := []productResult{
+		{URL: "https://a.com/1", GroupID: 11, Passed: true,
+			PublicProduct: extract.PublicProduct{Source: "a.com", PriceMinor: int64p(100), Currency: "USD"}},
+		{URL: "https://b.com/2", GroupID: 11, Passed: true,
+			PublicProduct: extract.PublicProduct{Source: "b.com", PriceMinor: int64p(90), Currency: "USD"}},
+	}
+	groups := buildAssignedGroups(results)
+	if len(groups) != 1 || groups[0].Match != "embedding" || groups[0].Key != "" {
+		t.Fatalf("embed group = %+v", groups)
+	}
+}
+
+func int64p(v int64) *int64 { return &v }
+
 func TestBestOfferSkipsFailed(t *testing.T) {
 	// The cheapest offer failed the caller's criteria — "best across
 	// stores" must never crown an excluded listing.

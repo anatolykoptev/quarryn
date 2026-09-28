@@ -201,6 +201,82 @@ func parseSpec(c string) (sizes []SizeReq, chips []ChipReq) {
 	return sizes, chips
 }
 
+// SpecsCompatible reports whether two product texts can describe the same
+// purchasable configuration — the pair-gate embedding-based grouping
+// (issue #98) applies after cosine recall. Each side is a set of evidence
+// rows (the product name, then name+variant-title rows); compatibility
+// needs ONE pair of rows with no contradiction, because a multi-config
+// listing and a single-config listing are the same product when they
+// share any row. Silence is not a contradiction: a row disclosing no
+// sizes/chips stays compatible with everything, mirroring checkSpec's
+// inconclusive semantics.
+func SpecsCompatible(rowsA, rowsB []string) bool {
+	for _, a := range rowsA {
+		for _, b := range rowsB {
+			if rowsCompatible(a, b) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// rowsCompatible is the single-row no-contradiction check: class-labeled
+// size mentions must overlap within their class when both sides declare
+// it, unlabeled ("any") sizes must overlap pairwise, and m-series chip
+// mentions must share gen+tier when both sides name one. An unlabeled
+// "64GB" is ambiguous — it cannot contradict an explicitly classed
+// declaration on the other side ("24GB" may well be the other's "24GB
+// RAM"), while two bare sizes that disagree ("64GB" vs "128GB") do
+// contradict: one of them describes a different product.
+func rowsCompatible(a, b string) bool {
+	sa, sb := rowSizes(a), rowSizes(b)
+	for _, class := range []SizeClass{ClassRAM, ClassStorage} {
+		va, vb := classSizes(sa, class), classSizes(sb, class)
+		if len(va) > 0 && len(vb) > 0 && !sizeSetsOverlap(va, vb) {
+			return false
+		}
+	}
+	va, vb := classSizes(sa, ClassAny), classSizes(sb, ClassAny)
+	if len(va) > 0 && len(vb) > 0 && !sizeSetsOverlap(va, vb) {
+		return false
+	}
+	ca, cb := rowChips(a), rowChips(b)
+	if len(ca) > 0 && len(cb) > 0 {
+		for _, x := range ca {
+			for _, y := range cb {
+				if x == y {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return true
+}
+
+// classSizes collects the GB values a row discloses with exactly the
+// given class label — unlabeled mentions form their own Any set rather
+// than leaking into both classes (see rowsCompatible).
+func classSizes(ms []sizeMention, class SizeClass) map[int64]struct{} {
+	out := map[int64]struct{}{}
+	for _, m := range ms {
+		if m.class == class {
+			out[m.gb] = struct{}{}
+		}
+	}
+	return out
+}
+
+func sizeSetsOverlap(a, b map[int64]struct{}) bool {
+	for v := range a {
+		if _, ok := b[v]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // sizeMention is one size a product row discloses, with its class hint.
 type sizeMention struct {
 	gb    int64

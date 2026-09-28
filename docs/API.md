@@ -40,6 +40,20 @@ spans ≥2 distinct stores, `groups[]` lists the cluster: every member
 criteria. `best_offer` is omitted when member offers mix currencies: a
 raw minor-unit compare across currencies would lie.
 
+When `GROUPS_DATABASE_URL` is configured the service keeps a persistent
+group registry (pgvector): results additionally carry `group_id`, and
+`groups[]` rows report `id` + `match` (`exact` — at least one member
+attached through an identifier; `embedding` — gated vector similarity
+only). Identifier-less products embed their canonical name through
+`EMBED_URL` and join the nearest stored group only when a structured gate
+agrees: digit-bearing model tokens must be compatible ("WH-1000XM5" never
+merges "WH-1000XM4"), tier words must be equal ("iPhone 16" ≠ "iPhone 16
+Pro"), and disclosed specs must not contradict per configuration row
+(same RAM/storage/chip rules as `spec_mismatch`). Merges with no model
+code on either side face a higher cosine bar. The embedding tier is
+strictly additive: with it off or unreachable, grouping falls back to
+exact-identifier keys only and search never fails for it.
+
 ### `product_match`
 
 Judge one caller-supplied product URL through the same extract+match path.

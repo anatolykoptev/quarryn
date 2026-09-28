@@ -53,6 +53,13 @@ bearer secret.
 | `MAX_PAGES_PER_SEARCH` | `30` | Total fetch/render calls one search may place (SERP + detail share it) |
 | `DOMAIN_MIN_INTERVAL_MS` | `2000` | Per-domain pacing floor; `0` disables pacing. Throttles back off 2s→4s→8s, max 3 retries, then the domain is skipped for that request |
 | `DATABASE_URL` | — | Postgres DSN: feedback sink, watches, orders; empty = those features unavailable |
+| `GROUPS_DATABASE_URL` | — | pgvector-capable Postgres DSN for the persistent product-group registry (issue #98 embedding tier); empty = ephemeral exact-only grouping |
+| `EMBED_URL` | — | Fleet embed-server (OpenAI-compatible `/v1/embeddings`); `EMBED_TOKEN` bearer is auto-read by go-kit. Empty = embedding tier off |
+| `EMBED_MODEL` | `multilingual-e5-large` | Embed model name served by the embed-server |
+| `EMBED_DIM` | `1024` | Embedding dimension — must match the model; a mismatch fails schema setup and disables the registry |
+| `GROUP_EMBED_THRESHOLD` | `0.90` | Cosine floor for a gated merge when both names carry model codes |
+| `GROUP_EMBED_WEAK_THRESHOLD` | `0.94` | Cosine bar when a model code is missing on either side |
+| `GROUP_TOPK` | `5` | Nearest-centroid candidates evaluated per result |
 | `FEEDBACK_FILE` | `/var/lib/quarryn/feedback.jsonl` | JSONL fallback log when PG writes fail (records logged, never dropped) |
 | `WATCH_TICK` | `15m` | Watch checker cadence |
 | `WATCH_MAX_PER_TICK` | `10` | Watches processed per tick |

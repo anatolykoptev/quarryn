@@ -116,6 +116,26 @@ type Config struct {
 	RankFunnelWeight float64
 	RankDealWeight   float64
 	RankJeffWeight   float64
+
+	// Embedding-tier product grouping (issue #98). GroupsDatabaseURL points
+	// at the pgvector-capable Postgres hosting the product_groups registry
+	// — the shared vector host's per-service database, same convention as
+	// go-code's gocode DSN. Empty → grouping stays ephemeral exact-only.
+	// EmbedURL/EmbedModel/EmbedDim point at the fleet embed-server
+	// (OpenAI-compatible /v1/embeddings; EMBED_TOKEN is auto-read by
+	// go-kit). Empty EmbedURL → exact identifiers still persist, keyless
+	// products never group.
+	GroupsDatabaseURL string
+	EmbedURL          string
+	EmbedModel        string
+	EmbedDim          int
+	// GroupEmbedThreshold is the cosine floor for a gated merge when both
+	// product names carry model codes; GroupEmbedWeak is the higher bar a
+	// merge needs when a model code is missing on either side — weak
+	// identity gets less benefit of the doubt.
+	GroupEmbedThreshold float64
+	GroupEmbedWeak      float64
+	GroupTopK           int
 }
 
 // Load reads configuration from environment variables.
@@ -168,5 +188,14 @@ func Load() Config {
 		RankFunnelWeight: env.Float("RANK_FUNNEL_WEIGHT", 0.3),
 		RankDealWeight:   env.Float("RANK_DEAL_WEIGHT", 0.2),
 		RankJeffWeight:   env.Float("RANK_JEFF_WEIGHT", 0.5),
+		// Embedding-tier grouping — same model/endpoint family vaelor and
+		// go-search use (EMBED_TOKEN env resolves inside go-kit).
+		GroupsDatabaseURL:   env.Str("GROUPS_DATABASE_URL", ""),
+		EmbedURL:            env.Str("EMBED_URL", ""),
+		EmbedModel:          env.Str("EMBED_MODEL", "multilingual-e5-large"),
+		EmbedDim:            env.Int("EMBED_DIM", 1024),
+		GroupEmbedThreshold: env.Float("GROUP_EMBED_THRESHOLD", 0.90),
+		GroupEmbedWeak:      env.Float("GROUP_EMBED_WEAK_THRESHOLD", 0.94),
+		GroupTopK:           env.Int("GROUP_TOPK", 5),
 	}
 }
