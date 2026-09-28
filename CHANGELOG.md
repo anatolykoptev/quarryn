@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/anatolykoptev/quarryn/compare/v1.20.0...v1.21.0) (2026-09-28)
+
+
+### Added
+
+* **watch:** webhook HMAC-V2 signing + chat_id (Hermes bot lane) ([#109](https://github.com/anatolykoptev/quarryn/issues/109)) ([31ed82a](https://github.com/anatolykoptev/quarryn/commit/31ed82a090e922ff56d36843999506e2c1889382))
+
 ## [1.20.0](https://github.com/anatolykoptev/quarryn/compare/v1.19.0...v1.20.0) (2026-09-28)
 
 
