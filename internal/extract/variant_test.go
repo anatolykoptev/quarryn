@@ -2,6 +2,7 @@ package extract
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -408,6 +409,31 @@ func TestOverCapDescriptionClipsNotFails(t *testing.T) {
 	}
 	if utf8.RuneCountInString(got.Product.Description) > maxDescriptionLen {
 		t.Fatalf("description not clipped: %d runes", utf8.RuneCountInString(got.Product.Description))
+	}
+}
+
+// The disposition clear must key on the .js mirror actually answering —
+// bounds normalization resolving the last problem on its own must not
+// un-flag a walled page. LLM fills the fields incl. an over-cap
+// description; the clip completes validation without any merchant doc.
+func TestBoundsClipAloneDoesNotClearNeedsRender(t *testing.T) {
+	page := "https://walled.example.com/products/x"
+	f := &routerFetcher{pages: map[string]*wowa.FetchResponse{
+		page:         {Status: 200, CFDetected: true, Body: "<html>cf</html>"},
+		page + ".js": {Status: 404},
+	}}
+	r := &stubRenderer{err: errors.New("chrome crashed")}
+	x := &stubExtractor{data: `{"name":"Rescued","price":9.99,"currency":"USD","description":"` +
+		strings.Repeat("d", 2500) + `"}`}
+	cfg := testConfig()
+	cfg.Render = r
+	p := New(f, x, cfg)
+
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		{Source: "web", URL: page},
+	})
+	if !out[0].NeedsRender {
+		t.Fatal("a clip that completed the product must not clear NeedsRender")
 	}
 }
 
