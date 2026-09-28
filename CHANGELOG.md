@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.1](https://github.com/anatolykoptev/quarryn/compare/v1.23.0...v1.23.1) (2026-09-28)
+
+
+### Fixed
+
+* **extract:** .js rescue reaches walled shopify pages ([#119](https://github.com/anatolykoptev/quarryn/issues/119)) ([760ab6b](https://github.com/anatolykoptev/quarryn/commit/760ab6bad70a01a21dfc1ad558424c4fe97e864e))
+
 ## [1.23.0](https://github.com/anatolykoptev/quarryn/compare/v1.22.0...v1.23.0) (2026-09-28)
 
 
