@@ -76,13 +76,16 @@ type shopifyJSVariant struct {
 // budget — a refused spend leaves the candidate SERP-level, exactly like a
 // refused page fetch. Best-effort: failures are silent by design because
 // the caller's outcome vocabulary has no variant-specific disposition.
-func (p *Pipeline) tryShopifyVariants(ctx context.Context, c sources.Candidate, prod *Product, budget *atomic.Int64, suspected bool) {
+// Returns true only when the mirror answered with a real product doc —
+// the caller's disposition-clear must key on merchant data arriving,
+// not on validation noise resolving itself.
+func (p *Pipeline) tryShopifyVariants(ctx context.Context, c sources.Candidate, prod *Product, budget *atomic.Int64, suspected bool) bool {
 	if !suspected || len(prod.Variants) > 0 || prod.jsTried || p.fetch == nil {
-		return
+		return false
 	}
 	jsURL := shopifyJSURL(c.URL)
 	if jsURL == "" || budget.Add(-1) < 0 {
-		return
+		return false
 	}
 	prod.jsTried = true // attempted once — a variant-less answer is final
 	resp, err := p.fetch.Fetch(ctx, wowa.FetchRequest{
@@ -90,7 +93,7 @@ func (p *Pipeline) tryShopifyVariants(ctx context.Context, c sources.Candidate, 
 		TimeoutSecs: p.cfg.FetchTimeoutSecs,
 	})
 	if err != nil {
-		return
+		return false
 	}
 	// Shopify normalizes storefront hosts (www→apex): wowa returns the
 	// 301 verbatim, so follow the one hop — but only while the Location
@@ -108,11 +111,13 @@ func (p *Pipeline) tryShopifyVariants(ctx context.Context, c sources.Candidate, 
 		}
 	}
 	if resp.Status != 200 {
-		return
+		return false
 	}
 	if p.shopifyJSMerge(prod, resp.Body) {
 		p.tryShopifyCurrency(ctx, jsURL, prod, budget)
+		return true
 	}
+	return false
 }
 
 // tryShopifyCurrency fills the store-level field the product doc does not

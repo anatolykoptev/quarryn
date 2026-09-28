@@ -203,6 +203,10 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 	ec := EnrichedCandidate{Candidate: c}
 	prod := productFromCandidate(c)
 	key := cacheKey(c.URL)
+	// Bound-clip before the first gate too — a SERP card with a 2500-rune
+	// description is complete, and must not spend a shared detail-fetch
+	// slot chasing a validation artifact (review finding on #122).
+	prod.normalizeBounds()
 
 	var outcome string
 	if len(prod.problems()) > 0 {
@@ -226,6 +230,12 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 	// Configurator top-up (issue #115): the deterministic .js mirror
 	// rescue and its disposition cleanup live in shopifyRescue.
 	outcome = p.shopifyRescue(ctx, c, &prod, &ec, outcome, budget)
+
+	// Optional fields past their caps are data to sanitize, not grounds
+	// to sink an otherwise-valid extraction — the egress blurb truncates
+	// further anyway (live v1.23.1: a 2231-rune schema.org description
+	// failed a complete expercom product on this bound alone).
+	prod.normalizeBounds()
 
 	if probs := prod.problems(); len(probs) > 0 {
 		ec.ExtractionFailed = true
@@ -268,14 +278,17 @@ func cacheableMethod(m string) bool {
 // still reaches the JSON asset that answers (one bounded 404 on foreign
 // hosts). When the merge delivers the fields the page tiers lost, the
 // failure disposition clears: match excludes NeedsRender candidates
-// (match.go) and the metric would misreport a healthy extraction.
-// Because the probe is the only mutation between the two problems()
-// reads, completing a partially LLM-filled product clears the flag too
-// — the deterministic merchant payload outranks the guess.
+// (match.go) and the metric would misreport a healthy extraction. The
+// clear keys on the mirror actually answering with a product doc —
+// bounds normalization resolving the last problem on its own must not
+// un-flag a walled page the tiers never reached.
 func (p *Pipeline) shopifyRescue(ctx context.Context, c sources.Candidate, prod *Product, ec *EnrichedCandidate, outcome string, budget *atomic.Int64) string {
 	wasIncomplete := len(prod.problems()) > 0
-	p.tryShopifyVariants(ctx, c, prod, budget, shopifySuspected(c))
-	if wasIncomplete && len(prod.problems()) == 0 {
+	rescued := p.tryShopifyVariants(ctx, c, prod, budget, shopifySuspected(c))
+	prod.normalizeBounds()
+	// Clear only when the merchant doc itself arrived — a clip alone
+	// resolving the last problem must not un-flag a walled page.
+	if rescued && wasIncomplete && len(prod.problems()) == 0 {
 		ec.NeedsRender = false
 		return ""
 	}
