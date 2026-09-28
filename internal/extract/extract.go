@@ -210,13 +210,7 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 
 	var outcome string
 	if len(prod.problems()) > 0 {
-		if cached, ok := p.cachedProduct(ctx, key); ok && !freshFrom(ctx) {
-			// A variant-less entry cached before this feature (24h TTL) or
-			// under a failed .js fetch still gets one rescue attempt —
-			// pinned watches must not ride out the TTL reporting
-			// no_offers on a listing that has a matrix.
-			p.tryShopifyVariants(ctx, c, cached, budget, shopifySuspected(c))
-			extractOutcomes.WithLabelValues("cache").Inc()
+		if cached, hit := p.serveCache(ctx, c, key, budget); hit {
 			ec.Product = *cached
 			return ec
 		}
@@ -259,6 +253,25 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 	}
 	ec.Product = prod
 	return ec
+}
+
+// serveCache reads the extraction cache unless the context is
+// freshness-critical (issue #120). Skipping the lookup entirely matters:
+// running it and discarding the result would still promote a stale
+// Redis L2 entry into L1 for everyone else. A variant-less hit still
+// earns one .js rescue attempt — a pinned watch must not ride out the
+// TTL reporting no_offers on a listing that has a matrix.
+func (p *Pipeline) serveCache(ctx context.Context, c sources.Candidate, key string, budget *atomic.Int64) (*Product, bool) {
+	if freshFrom(ctx) {
+		return nil, false
+	}
+	cached, ok := p.cachedProduct(ctx, key)
+	if !ok {
+		return nil, false
+	}
+	p.tryShopifyVariants(ctx, c, cached, budget, shopifySuspected(c))
+	extractOutcomes.WithLabelValues("cache").Inc()
+	return cached, true
 }
 
 // cacheableMethod whitelists the detail-tier methods worth a 24h cache

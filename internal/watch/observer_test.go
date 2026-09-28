@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -190,6 +191,85 @@ func TestObserveQueryConfirmsWinnerLive(t *testing.T) {
 		t.Fatalf("detail fetches = %d, want 2 (search + live confirm)", detailFetches.Load())
 	}
 }
+
+// A cached price ordering can hide the live-cheapest offer (review on
+// #120): the confirm leg must re-read the top few candidates, not only
+// the cached winner. deal-a caches at 249.99 but is 399.99 live; deal-b
+// was 299.99 cached, 219.99 live — the observation must pick deal-b.
+func TestObserveQueryConfirmsReordered(t *testing.T) {
+	for _, k := range []string{
+		"EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET",
+		"ETSY_API_KEY", "ETSY_SHARED_SECRET",
+		"SHOPIFY_SHOPS", "INTERNAL_SERVICE_SECRET", "REDIS_URL",
+	} {
+		t.Setenv(k, "")
+	}
+	var mu sync.Mutex
+	perURL := map[string]int{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v1/fetch" {
+			http.NotFound(w, r)
+			return
+		}
+		var req wowa.FetchRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		body := rssTwoDeals
+		for _, key := range []string{"deal-a", "deal-b"} {
+			if !strings.Contains(req.URL, key) {
+				continue
+			}
+			mu.Lock()
+			perURL[key]++ // first read = search leg, later = live confirm
+			n := perURL[key]
+			mu.Unlock()
+			price := map[string][2]string{
+				"deal-a": {"249.99", "399.99"},
+				"deal-b": {"299.99", "219.99"},
+			}[key][min(n-1, 1)]
+			body = strings.ReplaceAll(dealPageHTML, "deal-9", key)
+			body = strings.ReplaceAll(body, "249.99", price)
+		}
+		_ = json.NewEncoder(w).Encode(wowa.FetchResponse{Status: 200, Body: body})
+	}))
+	t.Cleanup(srv.Close)
+
+	s, err := search.New(config.Config{WowaURL: srv.URL},
+		sources.WithManifestGate(func(sources.Manifest, string) bool { return true }))
+	if err != nil {
+		t.Fatalf("search.New: %v", err)
+	}
+	obs := NewSearcherObserver(s).Observe(t.Context(), Watch{
+		Kind: KindQuery, Query: "deal", Currency: "USD",
+	})
+	if obs.Outcome != OutcomeOK {
+		t.Fatalf("outcome = %q (%s)", obs.Outcome, obs.Detail)
+	}
+	if obs.PriceMinor == nil || *obs.PriceMinor != 21999 {
+		t.Fatalf("price = %v — must be deal-b's live 219.99, not the cached winner 249.99", obs.PriceMinor)
+	}
+	if !strings.Contains(obs.OfferURL, "deal-b") {
+		t.Fatalf("offer_url = %q — must track the live-cheapest offer", obs.OfferURL)
+	}
+}
+
+// rssTwoDeals feeds two price-less items; their detail pages fill the
+// search-leg prices (deal-a 249.99, deal-b 299.99).
+const rssTwoDeals = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel><title>Slickdeals</title>
+    <item>
+      <title>Acme 4K Monitor A — hot deal</title>
+      <link>http://203.0.113.50/deal-a</link>
+      <description><![CDATA[Merchant: Acme]]></description>
+    </item>
+    <item>
+      <title>Acme 4K Monitor B — hot deal</title>
+      <link>http://203.0.113.50/deal-b</link>
+      <description><![CDATA[Merchant: Acme]]></description>
+    </item>
+  </channel>
+</rss>`
 
 // rssDeal + dealPageHTML mirror the search-package fixtures: a price-less
 // SERP item whose detail page carries JSON-LD — the detail fetch fills
