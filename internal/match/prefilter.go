@@ -2,6 +2,7 @@ package match
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -31,6 +32,7 @@ const (
 	ExclConditionMismatch    ReasonCode = "condition_mismatch"
 	ExclExtractionFailed     ReasonCode = "extraction_failed"
 	ExclDeferredRender       ReasonCode = "deferred_render"
+	ExclSpecMismatch         ReasonCode = "spec_mismatch"
 )
 
 // checkCandidate runs the deterministic constraints against one enriched
@@ -53,7 +55,10 @@ func checkCandidate(p extract.Product, c Constraints) (ReasonCode, string) {
 	if r, d := checkAvailability(p, c); r != "" {
 		return r, d
 	}
-	return checkCondition(p, c)
+	if r, d := checkCondition(p, c); r != "" {
+		return r, d
+	}
+	return checkSpec(p, c)
 }
 
 // checkCondition requires an exact canonical-enum match, same rule as
@@ -137,6 +142,86 @@ func checkAvailability(p extract.Product, c Constraints) (ReasonCode, string) {
 		return ExclAvailabilityMismatch, fmt.Sprintf("availability %q != required %q", p.Availability, c.Availability)
 	}
 	return "", ""
+}
+
+// checkSpec applies the parsed size/chip requirements (issue #111) per
+// purchasable row: when a variant matrix exists each row is name+one
+// variant title — pooling every variant into one bag would let a
+// 64GB/512GB variant and a 24GB/1TB variant jointly fake a "64GB AND
+// 1TB" config. Without variants the single row is name+description.
+// Any row satisfying every requirement passes; every row contradicting
+// at least one excludes spec_mismatch; anything else is inconclusive —
+// thin listings keep their jeff question.
+func checkSpec(p extract.Product, c Constraints) (ReasonCode, string) {
+	if len(c.SpecSizes) == 0 && len(c.SpecChips) == 0 {
+		return "", ""
+	}
+	var rows []string
+	if len(p.Variants) > 0 {
+		for _, v := range p.Variants {
+			rows = append(rows, p.Name+" "+v.Title)
+		}
+	} else {
+		rows = []string{p.Name + " " + p.Description}
+	}
+	contradicts, inconclusive := 0, 0
+	for _, row := range rows {
+		switch rowVerdict(row, c) {
+		case rowSatisfies:
+			return "", ""
+		case rowContradicts:
+			contradicts++
+		default:
+			inconclusive++
+		}
+	}
+	if contradicts > 0 && inconclusive == 0 {
+		return ExclSpecMismatch, fmt.Sprintf(
+			"no purchasable config satisfies sizes %v / chips %v",
+			c.SpecSizes, c.SpecChips)
+	}
+	return "", ""
+}
+
+const (
+	rowInconclusive = iota
+	rowSatisfies
+	rowContradicts
+)
+
+// rowVerdict scores one purchasable config row: satisfies when every
+// requirement is met, contradicts when at least one is answerable yet
+// unmet, inconclusive when a requirement has nothing to speak to.
+func rowVerdict(text string, c Constraints) int {
+	ms := rowSizes(text)
+	verdict := rowSatisfies
+	for _, req := range c.SpecSizes {
+		if slices.ContainsFunc(ms, req.satisfiedBy) {
+			continue
+		}
+		if req.answerableBy(ms) {
+			return rowContradicts
+		}
+		verdict = rowInconclusive
+	}
+	chips := rowChips(text)
+	for _, req := range c.SpecChips {
+		ok := false
+		for _, ch := range chips {
+			if ch.gen == req.Gen && ch.tier >= req.MinTier {
+				ok = true
+				break
+			}
+		}
+		if ok {
+			continue
+		}
+		if len(chips) > 0 {
+			return rowContradicts
+		}
+		verdict = rowInconclusive
+	}
+	return verdict
 }
 
 // containsWord reports whether haystack (already lower-cased) contains

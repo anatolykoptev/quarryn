@@ -67,15 +67,17 @@ var availabilities = map[string]struct{}{
 // Constraints is the deterministic half of a Plan, applied by the
 // prefilter BEFORE any jeff call (ADR-3).
 type Constraints struct {
-	PriceMin        *float64 `json:"price_min,omitempty"`
-	PriceMax        *float64 `json:"price_max,omitempty"`
-	Currency        string   `json:"currency,omitempty"` // ISO 4217, upper-cased at parse
-	BrandsInclude   []string `json:"brands_include,omitempty"`
-	BrandsExclude   []string `json:"brands_exclude,omitempty"`
-	KeywordsMust    []string `json:"keywords_must,omitempty"`
-	KeywordsMustNot []string `json:"keywords_must_not,omitempty"`
-	Availability    string   `json:"availability,omitempty"` // canonical enum
-	Condition       string   `json:"condition,omitempty"`    // canonical enum
+	PriceMin        *float64  `json:"price_min,omitempty"`
+	PriceMax        *float64  `json:"price_max,omitempty"`
+	Currency        string    `json:"currency,omitempty"` // ISO 4217, upper-cased at parse
+	BrandsInclude   []string  `json:"brands_include,omitempty"`
+	BrandsExclude   []string  `json:"brands_exclude,omitempty"`
+	KeywordsMust    []string  `json:"keywords_must,omitempty"`
+	KeywordsMustNot []string  `json:"keywords_must_not,omitempty"`
+	Availability    string    `json:"availability,omitempty"` // canonical enum
+	Condition       string    `json:"condition,omitempty"`    // canonical enum
+	SpecSizes       []SizeReq `json:"spec_sizes,omitempty"`   // parsed out of free-text criteria
+	SpecChips       []ChipReq `json:"spec_chips,omitempty"`
 }
 
 // empty reports whether no deterministic constraint was parsed.
@@ -83,7 +85,8 @@ func (c Constraints) empty() bool {
 	return c.PriceMin == nil && c.PriceMax == nil && c.Currency == "" &&
 		len(c.BrandsInclude) == 0 && len(c.BrandsExclude) == 0 &&
 		len(c.KeywordsMust) == 0 && len(c.KeywordsMustNot) == 0 &&
-		c.Availability == "" && c.Condition == ""
+		c.Availability == "" && c.Condition == "" &&
+		len(c.SpecSizes) == 0 && len(c.SpecChips) == 0
 }
 
 // Question is one subjective criterion packed for jeff. ID ("c0", "c1", …)
@@ -126,6 +129,14 @@ func PlanCriteria(raw []string) (Plan, error) {
 			continue
 		}
 		seen[c] = struct{}{}
+		// Machine-checkable spec tokens (sizes, chip tiers) inside a
+		// free-text criterion become deterministic constraints — jeff is
+		// demonstrably soft on numbers (issue #111). The question still
+		// goes to jeff: a product that discloses no spec is inconclusive
+		// to the deterministic gate and needs the judge.
+		sizes, chips := parseSpec(c)
+		plan.Constraints.SpecSizes = append(plan.Constraints.SpecSizes, sizes...)
+		plan.Constraints.SpecChips = append(plan.Constraints.SpecChips, chips...)
 		if len(plan.Questions) >= maxQuestions {
 			return Plan{}, fmt.Errorf("criterion %d: %w", i, ErrTooManyCriteria)
 		}
