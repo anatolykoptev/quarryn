@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.2](https://github.com/anatolykoptev/quarryn/compare/v1.23.1...v1.23.2) (2026-09-28)
+
+
+### Fixed
+
+* **extract:** clip over-cap optional fields, don't fail extraction ([#122](https://github.com/anatolykoptev/quarryn/issues/122)) ([5a79711](https://github.com/anatolykoptev/quarryn/commit/5a79711a06684a01293145a1500d1cedca5f47b1))
+
 ## [1.23.1](https://github.com/anatolykoptev/quarryn/compare/v1.23.0...v1.23.1) (2026-09-28)
 
 
