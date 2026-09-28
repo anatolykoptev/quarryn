@@ -27,7 +27,8 @@ type searchBrief struct {
 type briefFinalist struct {
 	Rank       int      `json:"rank"`
 	Name       string   `json:"name"`
-	URL        string   `json:"url"`
+	URL        string   `json:"url"` // purchase page — merchant URL when resolved, else listing
+	SourceURL  string   `json:"source_url,omitempty"`
 	BuyURL     string   `json:"buy_url,omitempty"`
 	Adapter    string   `json:"adapter"`
 	OfferID    string   `json:"offer_id,omitempty"`
@@ -71,10 +72,17 @@ func composeBrief(query string, plan match.Plan, ranked []rank.Result, sources [
 			if len(b.Finalists) >= briefFinalistsCap {
 				continue
 			}
+			url, source := jc.Product.BuyURL, ""
+			if url == "" {
+				url = jc.URL
+			} else if url != jc.URL {
+				source = jc.URL
+			}
 			b.Finalists = append(b.Finalists, briefFinalist{
 				Rank:       len(b.Finalists) + 1,
 				Name:       pub.Name,
-				URL:        jc.URL,
+				URL:        url,
+				SourceURL:  source,
 				BuyURL:     jc.Product.BuyURL,
 				Adapter:    jc.Source,
 				OfferID:    pub.OfferID,

@@ -82,6 +82,34 @@ func TestBriefFinalistCapDoesNotReject(t *testing.T) {
 	}
 }
 
+// TestBriefFinalistURLPrefersMerchant — when the interact tier resolved
+// an outbound merchant hop (BuyURL), url must carry the merchant page a
+// user would open, while source_url keeps the aggregator thread. A
+// silent swap back to the listing URL would route consumers to deal
+// forums instead of stores.
+func TestBriefFinalistURLPrefersMerchant(t *testing.T) {
+	passed := rankedPassed("https://slickdeals.net/f/123-deal-thread", 0.9)
+	passed.Judged.Product.BuyURL = "https://merchant.example/product/1"
+
+	plain := rankedPassed("https://shop.example/item-a", 0.8)
+
+	b := composeBrief("q", match.Plan{}, []rank.Result{passed, plain}, nil, trust.New(nil, nil))
+
+	if len(b.Finalists) != 2 {
+		t.Fatalf("finalists: %+v", b.Finalists)
+	}
+	f := b.Finalists[0]
+	if f.URL != "https://merchant.example/product/1" ||
+		f.SourceURL != "https://slickdeals.net/f/123-deal-thread" ||
+		f.BuyURL != "https://merchant.example/product/1" {
+		t.Fatalf("resolved hop must promote merchant to url, keep thread in source_url: %+v", f)
+	}
+	if b.Finalists[1].URL != "https://shop.example/item-a" ||
+		b.Finalists[1].SourceURL != "" {
+		t.Fatalf("unresolved listing keeps url=listing and empty source_url: %+v", b.Finalists[1])
+	}
+}
+
 // TestBriefEchoesInterpretation — the query, parsed constraints and
 // subjective criteria text must ride the brief so a consumer never
 // re-parses the criteria syntax to learn what was actually asked.

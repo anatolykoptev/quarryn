@@ -33,8 +33,11 @@ type productMatchInput struct {
 // description blurb. Anything outside that allowlist (seller names, raw
 // extraction payloads, metadata) is unreachable here by construction.
 type productResult struct {
-	URL     string `json:"url"`     // listing URL — needed to visit/buy the product
+	URL     string `json:"url"`     // purchase page — resolved merchant URL when known, else the listing URL
 	Adapter string `json:"adapter"` // adapter that sourced it (ebay/etsy/shopify/slickdeals)
+	// SourceURL is the original listing URL (e.g. a deal-aggregator thread).
+	// Present only when it differs from URL — i.e. an outbound hop resolved.
+	SourceURL string `json:"source_url,omitempty"`
 	// BuyURL is the resolved merchant URL captured when the interact tier
 	// followed the listing's outbound tracker (e.g. slickdeals /click →
 	// woot.com offer). Empty unless the solve tier resolved one.

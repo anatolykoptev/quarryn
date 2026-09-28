@@ -19,6 +19,11 @@ Full pipeline: adapters → extract → match → rank.
 Returns `request_id`, ranked `results` (with `offer_id`), `sources`,
 `degraded`/`degrade_reason`, per-candidate `exclusion` reasons.
 
+Each result's `url` is the purchase page — the resolved merchant URL when
+an outbound hop resolved (deal aggregators like slickdeals), else the
+listing URL. `source_url` keeps the originating listing when they differ;
+`buy_url` mirrors the resolved merchant URL for compatibility.
+
 ### `product_match`
 
 Judge one caller-supplied product URL through the same extract+match path.
