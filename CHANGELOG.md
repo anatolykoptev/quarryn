@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.1](https://github.com/anatolykoptev/quarryn/compare/v1.25.0...v1.25.1) (2026-09-28)
+
+
+### Fixed
+
+* solver-timeout escalation + honest watch outcomes ([#112](https://github.com/anatolykoptev/quarryn/issues/112)) ([#130](https://github.com/anatolykoptev/quarryn/issues/130)) ([25fe705](https://github.com/anatolykoptev/quarryn/commit/25fe705efdb9dfc502ed6592846ae6dc7ab4e904))
+
 ## [1.25.0](https://github.com/anatolykoptev/quarryn/compare/v1.24.1...v1.25.0) (2026-09-28)
 
 
