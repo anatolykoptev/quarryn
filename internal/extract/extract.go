@@ -211,7 +211,7 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 			// under a failed .js fetch still gets one rescue attempt —
 			// pinned watches must not ride out the TTL reporting
 			// no_offers on a listing that has a matrix.
-			p.tryShopifyVariants(ctx, c, cached, budget, c.Source == "shopify")
+			p.tryShopifyVariants(ctx, c, cached, budget, shopifySuspected(c))
 			extractOutcomes.WithLabelValues("cache").Inc()
 			ec.Product = *cached
 			return ec
@@ -223,12 +223,9 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 		// outbound tracker — resolve it when the interact budget allows.
 		p.tryInteract(ctx, rank, c, &prod, browser, true)
 	}
-	// Configurator top-up (issue #115): a shopify-adapter candidate whose
-	// leg could not carry the variant matrix (UCP catalog has no option
-	// titles) still has a deterministic /products/<handle>.js mirror —
-	// one cheap JSON fetch beats a blind judge. The products.json leg and
-	// schema/hasVariant fills already populated prod.Variants above.
-	p.tryShopifyVariants(ctx, c, &prod, budget, c.Source == "shopify")
+	// Configurator top-up (issue #115): the deterministic .js mirror
+	// rescue and its disposition cleanup live in shopifyRescue.
+	outcome = p.shopifyRescue(ctx, c, &prod, &ec, outcome, budget)
 
 	if probs := prod.problems(); len(probs) > 0 {
 		ec.ExtractionFailed = true
@@ -245,14 +242,44 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 	// Cache only detail-extracted products that passed validation — serp
 	// merges are free to recompute, and a poisoned entry would outlive the
 	// candidate list by 24h.
-	if !ec.ExtractionFailed && p.cfg.Cache != nil && key != "" &&
-		(prod.Method == MethodSchema || prod.Method == MethodRender || prod.Method == MethodLLM) {
+	if !ec.ExtractionFailed && p.cfg.Cache != nil && key != "" && cacheableMethod(prod.Method) {
 		if raw, err := json.Marshal(prod); err == nil {
 			p.cfg.Cache.Set(ctx, key, raw)
 		}
 	}
 	ec.Product = prod
 	return ec
+}
+
+// cacheableMethod whitelists the detail-tier methods worth a 24h cache
+// entry — serp merges are free to recompute.
+func cacheableMethod(m string) bool {
+	switch m {
+	case MethodSchema, MethodRender, MethodLLM, MethodShopifyJS:
+		return true
+	}
+	return false
+}
+
+// shopifyRescue runs the /products/<handle>.js mirror probe and returns
+// the disposition outcome. Suspected covers adapter-shopify candidates
+// (the UCP leg has no option titles) AND any URL with the canonical
+// product path shape — a direct product_match on a walled shopify page
+// still reaches the JSON asset that answers (one bounded 404 on foreign
+// hosts). When the merge delivers the fields the page tiers lost, the
+// failure disposition clears: match excludes NeedsRender candidates
+// (match.go) and the metric would misreport a healthy extraction.
+// Because the probe is the only mutation between the two problems()
+// reads, completing a partially LLM-filled product clears the flag too
+// — the deterministic merchant payload outranks the guess.
+func (p *Pipeline) shopifyRescue(ctx context.Context, c sources.Candidate, prod *Product, ec *EnrichedCandidate, outcome string, budget *atomic.Int64) string {
+	wasIncomplete := len(prod.problems()) > 0
+	p.tryShopifyVariants(ctx, c, prod, budget, shopifySuspected(c))
+	if wasIncomplete && len(prod.problems()) == 0 {
+		ec.NeedsRender = false
+		return ""
+	}
+	return outcome
 }
 
 // failureOutcome picks the metric label for a failed candidate when the
@@ -383,7 +410,8 @@ func (p *Pipeline) fetchDetail(ctx context.Context, c sources.Candidate, prod *P
 		// deterministically — and rescues name/price when the HTML had no
 		// schema.org Product at all (a share of extract_empty outcomes).
 		if len(prod.Variants) == 0 {
-			p.tryShopifyVariants(ctx, c, prod, budget, looksShopifyPage(resp.Body))
+			p.tryShopifyVariants(ctx, c, prod, budget,
+				looksShopifyPage(resp.Body) || shopifySuspected(c))
 		}
 		return false, ""
 	}

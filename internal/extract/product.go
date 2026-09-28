@@ -33,6 +33,9 @@ const (
 	// MethodInteract: a cleared live-browser session's DOM contributed
 	// (P-solve tier — the page stood behind a challenge /render lost).
 	MethodInteract = "interact"
+	// MethodShopifyJS: the deterministic /products/<handle>.js mirror
+	// contributed the fields (page fetch failed or carried no schema).
+	MethodShopifyJS = "shopify_js"
 )
 
 // Product is the normalized record this stage emits. Fields originate from
