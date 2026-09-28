@@ -59,6 +59,15 @@ type Product struct {
 	// detail extraction — identity is fixed at the SERP boundary.
 	OfferID string `json:"offer_id,omitempty"`
 	Method  string `json:"method"`
+	// Exact product identifiers for cross-store grouping (issue #98).
+	// GTIN is the global code (gtin8/12/13/14, any source); MPN the
+	// manufacturer part number; SKU the merchant's product-level code —
+	// set only when it identifies the whole product, not one variant.
+	// Never populated from titles — string-matching names produces false
+	// merges and poisons price history.
+	SKU  string `json:"sku,omitempty"`
+	MPN  string `json:"mpn,omitempty"`
+	GTIN string `json:"gtin,omitempty"`
 	// BuyURL is the resolved merchant URL captured when the interact tier
 	// followed a deal aggregator's outbound tracker (slickdeals /click).
 	// Distinct from URL (the listing/thread address) — this is where the
@@ -105,6 +114,48 @@ type EnrichedCandidate struct {
 	// (EXTRACT_LLM_DAILY_MAX) was reached. Typed data, not an error — the
 	// candidate continues with whatever the cheaper tiers produced.
 	LLMBudgetExhausted bool `json:"llm_budget_exhausted,omitempty"`
+}
+
+// GroupKey returns the offer-grouping identity (issue #98): a namespaced
+// exact-identifier key — "gtin:" preferred over "mpn:" over "sku:" — or ""
+// when the product carries no usable identifier. Equality of GroupKey is
+// the ONLY grouping signal; keys are normalized so "Z1ML-00050" and
+// "z1ml00050" collide, while length floors reject junk codes ("n/a", "0").
+func (p Product) GroupKey() string {
+	if g := digitsOnly(p.GTIN); len(g) >= 8 {
+		return "gtin:" + g
+	}
+	if m := identNorm(p.MPN); len(m) >= 4 {
+		return "mpn:" + m
+	}
+	if s := identNorm(p.SKU); len(s) >= 5 {
+		return "sku:" + s
+	}
+	return ""
+}
+
+// identNorm normalizes a merchant/manufacturer code for keying: lowercase,
+// alphanumeric only. Digits stay; separators ("-", "/", " ", ".") vanish.
+func identNorm(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// digitsOnly strips a GTIN to its digits — markup carries "0-19-425205-4"
+// and space-separated shapes; the check digit is part of the identity.
+func digitsOnly(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // PublicBlurbMax caps the description blurb that may leave the box.

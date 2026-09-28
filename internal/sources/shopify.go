@@ -266,6 +266,9 @@ func shopifyResult(shop string, p shopifyProduct) sources.Result {
 	if len(p.Images) > 0 && p.Images[0].Src != "" {
 		md[MetaImageURL] = p.Images[0].Src
 	}
+	if sku := distinctVariantSKU(p.Variants); sku != "" {
+		md[MetaSKU] = sku
+	}
 	if enc := EncodeVariants(shopifyVariants(shop, p)); enc != "" {
 		md[MetaVariants] = enc
 	}
@@ -275,6 +278,28 @@ func shopifyResult(shop string, p shopifyProduct) sources.Result {
 		Content:  p.Title,
 		Metadata: md,
 	}
+}
+
+// distinctVariantSKU returns the merchant SKU only when it names the whole
+// product — a single variant, or every variant carrying the same code.
+// Per-configuration SKUs are variant identity, not product identity, and
+// must not seed cross-store grouping (issue #98).
+func distinctVariantSKU(vs []shopifyVariant) string {
+	sku := ""
+	for _, v := range vs {
+		s := strings.TrimSpace(v.SKU)
+		if s == "" {
+			continue
+		}
+		if sku == "" {
+			sku = s
+			continue
+		}
+		if s != sku {
+			return ""
+		}
+	}
+	return sku
 }
 
 // shopifyVariants maps the products.json variant list onto the wire

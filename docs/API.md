@@ -31,6 +31,15 @@ first, capped at 40; absent on single-variant listings. Shopify pages get
 the matrix from the deterministic `/products/<handle>.js` mirror; other
 stores from schema.org `ProductGroup.hasVariant` or adapter metadata.
 
+Each result may carry `group_key` — an exact-identifier product identity
+(`gtin:`/`mpn:`/`sku:` + normalized code from schema.org markup, adapter
+metadata or the Shopify `.js` mirror; never title-derived). When one key
+spans ≥2 distinct stores, `groups[]` lists the cluster: every member
+`offers[]` (`url`, `source`, `price_minor`, `currency`, `availability`,
+`passed`) plus `best_offer` — the cheapest offer still passing the
+criteria. `best_offer` is omitted when member offers mix currencies: a
+raw minor-unit compare across currencies would lie.
+
 ### `product_match`
 
 Judge one caller-supplied product URL through the same extract+match path.

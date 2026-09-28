@@ -132,6 +132,16 @@ func productFromItem(item *microdata.Item, pageURL string) *Product {
 	if s := propStr(item, "description"); s != nil {
 		p.Description = *s
 	}
+	if s := propStr(item, "sku"); s != nil {
+		p.SKU = *s
+	}
+	if s := propStr(item, "mpn"); s != nil {
+		p.MPN = *s
+	}
+	// GTIN namespaces are all the same code space — first non-empty wins.
+	if s := propStr(item, "gtin13", "gtin", "gtin14", "gtin12", "gtin8"); s != nil {
+		p.GTIN = *s
+	}
 	if s := propStr(item, "image"); s != nil {
 		p.ImageURL = *s
 	} else if img, ok := item.GetNestedItem("image"); ok {

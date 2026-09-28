@@ -103,6 +103,10 @@ const (
 	MetaListingID = "listing_id"
 	// MetaImageURL is the primary product image.
 	MetaImageURL = "image_url"
+	// MetaSKU is the merchant SKU — emitted only when it identifies the
+	// whole product (single variant, or every variant shares it). Feeds
+	// exact-identifier grouping (issue #98).
+	MetaSKU = "sku"
 )
 
 // Availability vocabulary for MetaAvailability.

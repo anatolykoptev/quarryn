@@ -233,6 +233,12 @@ func (p *Pipeline) shopifyJSMerge(prod *Product, body string) bool {
 // its variants but keeps its provenance.
 func shopifyJSFill(prod *Product, jp *shopifyJSProduct, best *int64, anyStock bool) bool {
 	contributed := len(prod.Variants) > 0 // caller just assigned them
+	if prod.SKU == "" {
+		if sku := distinctJSSKU(jp.Variants); sku != "" {
+			prod.SKU = sku
+			contributed = true
+		}
+	}
 	if strings.TrimSpace(prod.Name) == "" && jp.Title != "" {
 		prod.Name = jp.Title
 		contributed = true
@@ -260,6 +266,27 @@ func shopifyJSFill(prod *Product, jp *shopifyJSProduct, best *int64, anyStock bo
 		contributed = true
 	}
 	return contributed
+}
+
+// distinctJSSKU mirrors sources' rule: a SKU names the product only when
+// one distinct non-empty code covers every variant — per-configuration
+// codes are variant identity, not groupable product identity (#98).
+func distinctJSSKU(vs []shopifyJSVariant) string {
+	sku := ""
+	for _, v := range vs {
+		s := strings.TrimSpace(v.SKU)
+		if s == "" {
+			continue
+		}
+		if sku == "" {
+			sku = s
+			continue
+		}
+		if s != sku {
+			return ""
+		}
+	}
+	return sku
 }
 
 // shopifyJSVariants maps the .js variant list to wire form, skipping

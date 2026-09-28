@@ -62,6 +62,7 @@ func handleProductSearch(ctx context.Context, d deps, in productSearchInput) (*m
 		resp.Results = append(resp.Results, project(r, d.trust))
 	}
 	resp.Brief = composeBrief(in.Query, out.Plan, ranked, out.Sources, d.trust)
+	resp.Groups = buildGroups(resp.Results)
 	return jsonResult(resp)
 }
 
@@ -93,5 +94,77 @@ func project(r rank.Result, tp *trust.Provider) productResult {
 		ExcludedReason:  string(r.ExcludedReason),
 		ExcludedDetail:  r.ExcludedDetail,
 		UnjudgedReason:  string(r.UnjudgedReason),
+		GroupKey:        jc.Product.GroupKey(),
 	}
+}
+
+// buildGroups clusters results sharing an exact-identifier GroupKey
+// (issue #98) and emits the clusters spanning ≥2 distinct stores —
+// same-store duplicates are still tagged per-result via group_key but
+// don't make a comparison row. best_offer is the cheapest offer still
+// passing the caller's criteria; mixed-currency clusters get none.
+func buildGroups(results []productResult) []productGroup {
+	byKey := make(map[string][]productResult)
+	var order []string
+	for _, r := range results {
+		if r.GroupKey == "" {
+			continue
+		}
+		if _, seen := byKey[r.GroupKey]; !seen {
+			order = append(order, r.GroupKey)
+		}
+		byKey[r.GroupKey] = append(byKey[r.GroupKey], r)
+	}
+	var groups []productGroup
+	for _, key := range order {
+		members := byKey[key]
+		stores := make(map[string]struct{}, len(members))
+		g := productGroup{Key: key}
+		for _, m := range members {
+			stores[m.Source] = struct{}{}
+			g.Offers = append(g.Offers, groupOffer{
+				URL:          m.URL,
+				Source:       m.Source,
+				PriceMinor:   m.PriceMinor,
+				Currency:     m.Currency,
+				Availability: m.Availability,
+				Passed:       m.Passed,
+			})
+		}
+		if len(stores) < 2 {
+			continue
+		}
+		g.BestOffer = bestOffer(g.Offers)
+		groups = append(groups, g)
+	}
+	return groups
+}
+
+// bestOffer picks the cheapest still-passing offer, requiring one shared
+// currency — comparing raw minor units across currencies would be a lie.
+// A priced, passing offer always beats an unpriced or excluded one; all
+// else equal, the first (highest-ranked) offer wins.
+func bestOffer(offers []groupOffer) *groupOffer {
+	currency := ""
+	for _, o := range offers {
+		if o.Currency == "" {
+			continue
+		}
+		if currency == "" {
+			currency = o.Currency
+		} else if o.Currency != currency {
+			return nil
+		}
+	}
+	var best *groupOffer
+	for i := range offers {
+		o := &offers[i]
+		if !o.Passed || o.PriceMinor == nil {
+			continue
+		}
+		if best == nil || *o.PriceMinor < *best.PriceMinor {
+			best = o
+		}
+	}
+	return best
 }
