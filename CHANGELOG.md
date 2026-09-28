@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.0](https://github.com/anatolykoptev/quarryn/compare/v1.24.1...v1.25.0) (2026-09-28)
+
+
+### Added
+
+* exact-identifier offer grouping across stores ([#98](https://github.com/anatolykoptev/quarryn/issues/98)) ([#128](https://github.com/anatolykoptev/quarryn/issues/128)) ([d9f58ee](https://github.com/anatolykoptev/quarryn/commit/d9f58ee5af03a7d7b1509089bf7e096bdb3f37de))
+
 ## [1.24.1](https://github.com/anatolykoptev/quarryn/compare/v1.24.0...v1.24.1) (2026-09-28)
 
 
