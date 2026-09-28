@@ -56,7 +56,7 @@ Price/restock watches on Postgres. `action`: `add | list | get | cancel | check_
 
 | Arg | Type | Notes |
 |---|---|---|
-| `kind` | `offer|query` | `offer` re-fetches one pinned URL; `query` re-runs search and takes the cheapest passed offer in `currency` |
+| `kind` | `offer|query` | `offer` re-fetches one pinned URL; `query` re-runs search and takes the cheapest passed offer in `currency`. Every observation reads the page live — the 24h extraction cache is bypassed so alerts never fire on stale prices |
 | `url` / `offer_id` | string | `add kind=offer`: page to re-fetch; `offer_id` optional stable id |
 | `variant` | string | `add kind=offer` only: pin one configuration — variant id or option-title substring (`"64GB"`). The observer follows that variant's price/availability/URL; a selector matching nothing fails closed (`no_offers`), never watches the wrong SKU |
 | `query` / `criteria` | string / string[] | `add kind=query`: search text + criteria |

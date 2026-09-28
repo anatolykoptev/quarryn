@@ -113,6 +113,33 @@ func TestEnrichCacheHitAvoidsSecondFetch(t *testing.T) {
 	}
 }
 
+// WithFresh must bypass the cache READ for freshness-critical callers
+// (watch observations, product_match — issue #120) while still WRITING:
+// the live fetch re-warms the entry for ordinary search traffic.
+func TestEnrichFreshBypassesCacheRead(t *testing.T) {
+	c := cache.New(cache.Config{L1MaxItems: 100})
+	t.Cleanup(c.Close)
+	f := &stubFetcher{resp: &wowa.FetchResponse{Status: 200, Body: amazonProductHTML}}
+	cfg := testConfig()
+	cfg.Cache = c
+	p := New(f, nil, cfg)
+	in := []sources.Candidate{
+		cand("https://www.amazon.com/dp/B09XS7JWHH?utm_source=x", "Sony WH-1000XM5", nil),
+	}
+	p.Enrich(t.Context(), in) // warms the cache: 1 fetch
+	p.Enrich(WithFresh(t.Context()), in)
+	if f.calls.Load() != 2 {
+		t.Fatalf("fresh Enrich must re-fetch: calls = %d, want 2", f.calls.Load())
+	}
+	out := p.Enrich(t.Context(), in)
+	if f.calls.Load() != 2 {
+		t.Fatalf("post-fresh read must hit the re-warmed cache: calls = %d", f.calls.Load())
+	}
+	if out[0].Product.PriceMinor == nil || *out[0].Product.PriceMinor != 27800 {
+		t.Fatalf("cached product wrong: %+v", out[0].Product)
+	}
+}
+
 func TestEnrichLLMFallbackFillsPrice(t *testing.T) {
 	f := &stubFetcher{resp: &wowa.FetchResponse{Status: 200, Body: `<html><body>plain page</body></html>`}}
 	x := &stubExtractor{data: `{"name":"Mystery Gadget","price":42.5,"currency":"USD","condition":"used"}`}

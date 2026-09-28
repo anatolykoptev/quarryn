@@ -1,6 +1,7 @@
 package extract
 
 import (
+	"context"
 	"net/url"
 	"strings"
 
@@ -58,4 +59,22 @@ func cacheKey(rawURL string) string {
 		return ""
 	}
 	return extractorVersion + ":" + cache.Key(canon)
+}
+
+// freshKey flags a request whose callers need a live page read — the
+// 24h extraction cache would serve a watch a stale price for its whole
+// TTL (issue #120). Fresh contexts skip the cache READ; the WRITE still
+// happens, so a live fetch re-warms the entry for everyone else.
+type freshKey struct{}
+
+// WithFresh marks ctx as freshness-critical — "judge this URL now"
+// callers (product_match, watch observations) rather than search fan-out.
+func WithFresh(ctx context.Context) context.Context {
+	return context.WithValue(ctx, freshKey{}, true)
+}
+
+// freshFrom reports whether the context must bypass cache reads.
+func freshFrom(ctx context.Context) bool {
+	f, _ := ctx.Value(freshKey{}).(bool)
+	return f
 }

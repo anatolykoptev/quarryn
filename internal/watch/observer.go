@@ -1,7 +1,9 @@
 package watch
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -155,43 +157,110 @@ func variantOfferURL(watchURL string, v *sources.Variant) string {
 	return watchURL
 }
 
-// observeQuery re-runs the watch's search and takes the cheapest passed
-// offer in the watch's currency — currency mismatch is a hard skip, a
-// GBP offer cannot satisfy a USD target.
+// observeQuery re-runs the watch's search, then live-confirms the
+// cheapest few passed offers before reporting (issue #120). The search
+// leg may have ordered candidates on cached prices — up to 3 distinct
+// URLs are re-read through MatchURL (freshness-critical, and re-judged
+// against the watch's criteria: a listing that changed so it no longer
+// qualifies must not alert). The alert carries the cheapest offer that
+// still passes LIVE.
 func (o *SearcherObserver) observeQuery(ctx context.Context, w Watch) Observation {
 	out, err := o.s.SearchDetailed(ctx, w.Query, w.Criteria, 5)
 	if err != nil {
 		return Observation{Outcome: OutcomeFetchFailed, Detail: err.Error()}
 	}
-	var best *extract.Product
-	var bestURL, bestID string
-	for i := range out.Candidates {
-		c := &out.Candidates[i]
-		if !c.Passed || c.ExtractionFailed || c.NeedsRender {
-			continue
-		}
-		p := &c.Product
-		if p.PriceMinor == nil || p.Currency != w.Currency {
-			continue
-		}
-		if best == nil || *p.PriceMinor < *best.PriceMinor {
-			best = p
-			bestURL = c.URL
-			bestID = p.OfferID
-		}
-	}
-	if best == nil {
+	urls := cheapestURLs(out, w.Currency, 3)
+	if len(urls) == 0 {
 		return Observation{Outcome: OutcomeNoOffers, Detail: "no passed offer in currency " + w.Currency}
 	}
-	return Observation{
-		PriceMinor:   best.PriceMinor,
-		Currency:     best.Currency,
-		Availability: best.Availability,
-		OfferURL:     bestURL,
-		OfferID:      bestID,
-		Outcome:      OutcomeOK,
-		Product:      best,
+	live, liveURL, lastErr := o.confirmLive(ctx, urls, w)
+	if live == nil {
+		if lastErr != "" {
+			return Observation{Outcome: OutcomeFetchFailed, Detail: "live confirm: " + lastErr}
+		}
+		return Observation{
+			Outcome: OutcomeNoOffers,
+			Detail:  "no offer still passes live in currency " + w.Currency,
+		}
 	}
+	return Observation{
+		PriceMinor:   live.PriceMinor,
+		Currency:     live.Currency,
+		Availability: live.Availability,
+		OfferURL:     liveURL,
+		OfferID:      live.OfferID,
+		Outcome:      OutcomeOK,
+		Product:      live,
+	}
+}
+
+// cheapestURLs returns up to n distinct candidate URLs that passed and
+// carry a price in the watch's currency, cheapest first — a GBP offer
+// cannot satisfy a USD target.
+func cheapestURLs(out search.Output, currency string, n int) []string {
+	var refs []offerRef
+	seen := map[string]bool{}
+	for i := range out.Candidates {
+		c := &out.Candidates[i]
+		if !c.Passed || c.ExtractionFailed || c.NeedsRender || seen[c.URL] {
+			continue
+		}
+		if c.Product.PriceMinor == nil || c.Product.Currency != currency {
+			continue
+		}
+		seen[c.URL] = true
+		refs = append(refs, offerRef{url: c.URL, price: *c.Product.PriceMinor})
+	}
+	slices.SortFunc(refs, func(a, b offerRef) int {
+		return cmp.Compare(a.price, b.price)
+	})
+	urls := make([]string, 0, min(n, len(refs)))
+	for _, r := range refs[:min(n, len(refs))] {
+		urls = append(urls, r.url)
+	}
+	return urls
+}
+
+// confirmLive re-reads each URL live and returns the cheapest product
+// that still passes the watch's criteria, or the last confirm error.
+func (o *SearcherObserver) confirmLive(ctx context.Context, urls []string, w Watch) (*extract.Product, string, string) {
+	var live *extract.Product
+	var liveURL, lastErr string
+	for _, u := range urls {
+		cout, cerr := o.s.MatchURL(ctx, u, w.Criteria)
+		if cerr != nil {
+			lastErr = cerr.Error()
+			continue
+		}
+		lc := passedProduct(cout)
+		if lc == nil || lc.Currency != w.Currency {
+			continue
+		}
+		if live == nil || *lc.PriceMinor < *live.PriceMinor {
+			live, liveURL = lc, u
+		}
+	}
+	return live, liveURL, lastErr
+}
+
+// offerRef is a passed search candidate queued for live confirmation.
+type offerRef struct {
+	url   string
+	price int64
+}
+
+// passedProduct returns the first judged candidate that still passes and
+// extracted — the live-confirm leg requires the winner to satisfy the
+// watch's criteria again, not merely to have fetched.
+func passedProduct(out search.Output) *extract.Product {
+	for i := range out.Candidates {
+		c := &out.Candidates[i]
+		if c.Passed && !c.ExtractionFailed && !c.NeedsRender &&
+			c.Product.PriceMinor != nil {
+			return &c.Product
+		}
+	}
+	return nil
 }
 
 func firstProduct(out search.Output) *extract.Product {
