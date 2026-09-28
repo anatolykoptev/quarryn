@@ -49,10 +49,7 @@ func (o *SearcherObserver) observeOffer(ctx context.Context, w Watch) Observatio
 	}
 	p := firstProduct(out)
 	if p == nil || (p.PriceMinor == nil && p.Name == "") {
-		return Observation{
-			Outcome: OutcomeExtractEmpty,
-			Detail:  "fetched but no product extracted — listing may be gone",
-		}
+		return emptyObservation(out)
 	}
 	if w.VariantSel != "" {
 		return observeVariant(w, p)
@@ -261,6 +258,35 @@ func passedProduct(out search.Output) *extract.Product {
 		}
 	}
 	return nil
+}
+
+// emptyObservation maps a product-less match result to an honest outcome:
+// a fetch-tier disposition (page never yielded parseable data — wall,
+// budget, render failure) is transient fetch_failed and must NOT count
+// toward unverifiable; a reached-but-empty page ("incomplete", "invalid",
+// "llm_budget") is the real extract_empty — listing gone or too thin to
+// read (issue #112).
+func emptyObservation(out search.Output) Observation {
+	for i := range out.Candidates {
+		if oc := out.Candidates[i].Outcome; oc != "" {
+			switch oc {
+			case "fetch_failed", "over_budget", "render_deferred", "render_failed":
+				return Observation{
+					Outcome: OutcomeFetchFailed,
+					Detail:  "extract: " + oc,
+				}
+			default:
+				return Observation{
+					Outcome: OutcomeExtractEmpty,
+					Detail:  "fetched but no product extracted — listing may be gone (extract: " + oc + ")",
+				}
+			}
+		}
+	}
+	return Observation{
+		Outcome: OutcomeExtractEmpty,
+		Detail:  "fetched but no product extracted — listing may be gone",
+	}
 }
 
 func firstProduct(out search.Output) *extract.Product {

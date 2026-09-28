@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -26,7 +27,9 @@ import (
 // (page needs JS render but no renderer is wired) | render_failed |
 // over_budget (detail-fetch or per-request page budget exhausted) |
 // llm_budget (daily LLM spend cap reached — candidate kept unenriched) |
-// fetch_failed | incomplete (required fields never obtained) | invalid
+// fetch_failed | gone (upstream answered 404/410 — the listing is dead,
+// distinct from transient failures so watchers can count it toward
+// unverifiable) | incomplete (required fields never obtained) | invalid
 // (values rejected by strict validation).
 var extractOutcomes = promauto.NewCounterVec(
 	prometheus.CounterOpts{
@@ -211,6 +214,7 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 	var outcome string
 	if len(prod.problems()) > 0 {
 		if cached, hit := p.serveCache(ctx, c, key, budget); hit {
+			ec.Outcome = "cache"
 			ec.Product = *cached
 			return ec
 		}
@@ -242,6 +246,7 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 		outcome = prod.Method
 	}
 	extractOutcomes.WithLabelValues(outcome).Inc()
+	ec.Outcome = outcome
 
 	// Cache only detail-extracted products that passed validation — serp
 	// merges are free to recompute, and a poisoned entry would outlive the
@@ -372,6 +377,10 @@ func (p *Pipeline) extractDetail(ctx context.Context, rank int, c sources.Candid
 				// Render could not clear the wall — try the live-session
 				// solve tier before spending an LLM call.
 				if p.tryInteract(ctx, rank, c, prod, browser, false) {
+					// The solved session delivered a real DOM — the
+					// product is trusted; the wall flag must not outlive
+					// it (match and watchers exclude NeedsRender).
+					ec.NeedsRender = false
 					return ""
 				}
 				p.tryLLM(ctx, rank, c, prod, ec)
@@ -425,6 +434,12 @@ func (p *Pipeline) fetchDetail(ctx context.Context, c sources.Candidate, prod *P
 		return false, "fetch_failed"
 	case resp.Status >= 400:
 		// Dead page — the LLM would hit the same corpse; skip everything.
+		// 404/410 gets its own label: the listing is GONE, not a transient
+		// fetch failure — watchers must still count it toward unverifiable
+		// (issue #112 review).
+		if resp.Status == http.StatusNotFound || resp.Status == http.StatusGone {
+			return false, "gone"
+		}
 		return false, "fetch_failed"
 	case resp.CFDetected:
 		// Bot-wall challenge page: the plain fetch carried the page but a
@@ -445,13 +460,17 @@ func (p *Pipeline) fetchDetail(ctx context.Context, c sources.Candidate, prod *P
 
 // isCFChallengeError reports whether a wowa fetch error is a bot-management
 // challenge surfaced as a transport failure rather than a CFDetected body —
-// e.g. "remote error (http 502): cloudflare managed_challenge_200".
+// e.g. "remote error (http 502): cloudflare managed_challenge_200", or the
+// solver layer reporting a clearance timeout ("solver failed: timeout
+// waiting for cf_clearance" — live signature on ebay/woot, issue #112).
 func isCFChallengeError(err error) bool {
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "cloudflare") ||
 		strings.Contains(s, "managed_challenge") ||
 		strings.Contains(s, "cf_challenge") ||
-		strings.Contains(s, "cf_detected")
+		strings.Contains(s, "cf_detected") ||
+		strings.Contains(s, "cf_clearance") ||
+		strings.Contains(s, "solver failed")
 }
 
 // renderTimeoutSecs gives the render tier more headroom than a plain fetch —

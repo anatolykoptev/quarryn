@@ -12,6 +12,7 @@ import (
 	"github.com/anatolykoptev/go-kit/wowa"
 	"github.com/anatolykoptev/quarryn/internal/config"
 	"github.com/anatolykoptev/quarryn/internal/extract"
+	"github.com/anatolykoptev/quarryn/internal/match"
 	"github.com/anatolykoptev/quarryn/internal/search"
 	"github.com/anatolykoptev/quarryn/internal/sources"
 )
@@ -293,3 +294,44 @@ const dealPageHTML = `<!doctype html><html><head>
  "offers":{"@type":"Offer","price":"249.99","priceCurrency":"USD",
    "availability":"https://schema.org/InStock"}}
 </script></head><body>monitor</body></html>`
+
+// emptyObservation must keep the extract tier's disposition visible: a
+// wall/budget/render failure is transient fetch_failed (never counts
+// toward unverifiable), while a reached-but-thin page stays extract_empty
+// — the "listing gone" signal unverifiable actually means (issue #112).
+func TestEmptyObservationSplitsTiers(t *testing.T) {
+	jc := func(outcome string) match.JudgedCandidate {
+		return match.JudgedCandidate{EnrichedCandidate: extract.EnrichedCandidate{
+			Outcome: outcome, ExtractionFailed: true}}
+	}
+	cases := []struct {
+		outcome, want string
+	}{
+		{"fetch_failed", OutcomeFetchFailed},
+		{"over_budget", OutcomeFetchFailed},
+		{"render_deferred", OutcomeFetchFailed},
+		{"render_failed", OutcomeFetchFailed},
+		{"incomplete", OutcomeExtractEmpty},
+		{"invalid", OutcomeExtractEmpty},
+		{"llm_budget", OutcomeExtractEmpty},
+		// A hard 404/410 IS the "listing gone" semantic — it must keep
+		// counting toward unverifiable, not linger as transient.
+		{"gone", OutcomeExtractEmpty},
+	}
+	for _, tc := range cases {
+		obs := emptyObservation(search.Output{Candidates: []match.JudgedCandidate{jc(tc.outcome)}})
+		if obs.Outcome != tc.want {
+			t.Fatalf("extract %q → %q, want %q", tc.outcome, obs.Outcome, tc.want)
+		}
+	}
+	// The detail names the tier — per-domain forensics the issue asked for.
+	obs := emptyObservation(search.Output{Candidates: []match.JudgedCandidate{jc("render_failed")}})
+	if obs.Detail != "extract: render_failed" {
+		t.Fatalf("detail = %q", obs.Detail)
+	}
+	// No outcome information at all → the legacy empty message.
+	obs = emptyObservation(search.Output{})
+	if obs.Outcome != OutcomeExtractEmpty || obs.Detail == "" {
+		t.Fatalf("no-candidate fallback = %+v", obs)
+	}
+}
