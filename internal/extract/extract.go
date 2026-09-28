@@ -207,6 +207,11 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 	var outcome string
 	if len(prod.problems()) > 0 {
 		if cached, ok := p.cachedProduct(ctx, key); ok {
+			// A variant-less entry cached before this feature (24h TTL) or
+			// under a failed .js fetch still gets one rescue attempt —
+			// pinned watches must not ride out the TTL reporting
+			// no_offers on a listing that has a matrix.
+			p.tryShopifyVariants(ctx, c, cached, budget, c.Source == "shopify")
 			extractOutcomes.WithLabelValues("cache").Inc()
 			ec.Product = *cached
 			return ec

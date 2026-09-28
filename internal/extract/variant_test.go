@@ -6,21 +6,30 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anatolykoptev/go-kit/cache"
 	"github.com/anatolykoptev/go-kit/wowa"
 	"github.com/anatolykoptev/quarryn/internal/sources"
 )
 
 // routerFetcher serves canned responses keyed by URL — the .js rescue
 // must hit /products/<handle>.js while the detail fetch takes the page.
+// A URL in `once` is consumed a single time (first call), then falls
+// back to pages/404 — lets a test flip an endpoint between Enrich runs.
 type routerFetcher struct {
 	mu    sync.Mutex
 	seen  []string
 	pages map[string]*wowa.FetchResponse
+	once  map[string]*wowa.FetchResponse
 }
 
 func (r *routerFetcher) Fetch(_ context.Context, req wowa.FetchRequest) (*wowa.FetchResponse, error) {
 	r.mu.Lock()
 	r.seen = append(r.seen, req.URL)
+	if resp, ok := r.once[req.URL]; ok {
+		delete(r.once, req.URL)
+		r.mu.Unlock()
+		return resp, nil
+	}
 	r.mu.Unlock()
 	if resp, ok := r.pages[req.URL]; ok {
 		return resp, nil
@@ -56,6 +65,16 @@ const shopifyJSBody = `{
 const shopifyPageHTML = `<!doctype html><html><head>
 <script src="https://cdn.shopify.com/s/assets/app.js"></script>
 </head><body><h1>MacBook Pro 14</h1></body></html>`
+
+// shopifySchemaHTML carries the storefront marker AND a schema.org
+// Product — the page validates and caches even when .js fails.
+const shopifySchemaHTML = `<!doctype html><html><head>
+<script src="https://cdn.shopify.com/s/assets/app.js"></script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Product","name":"Cached Widget",
+ "offers":{"@type":"Offer","price":"19.99","priceCurrency":"USD",
+  "availability":"https://schema.org/InStock"}}
+</script></head><body><h1>Cached Widget</h1></body></html>`
 
 func TestShopifyJSURL(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
@@ -166,6 +185,51 @@ func TestPublicVariantsProjection(t *testing.T) {
 	}
 	if out[0].Title == "" {
 		t.Fatal("empty projected title")
+	}
+}
+
+// An all-unavailable .js matrix must stamp out_of_stock — leaving ""
+// hides the listing from availability filters and restock watches.
+func TestShopifyJSMergeAllUnavailable(t *testing.T) {
+	prod := &Product{URL: "https://s.example.com/products/p"}
+	p := New(nil, nil, testConfig())
+	p.shopifyJSMerge(prod, `{"title":"T","variants":[
+		{"id":1,"title":"64GB","price":352900,"available":false}]}`)
+	if prod.Availability != "out_of_stock" {
+		t.Fatalf("availability = %q, want out_of_stock", prod.Availability)
+	}
+}
+
+// A variant-less cache hit still earns one rescue attempt — a pinned
+// watch must not ride out the 24h TTL reporting no_offers (Review #116).
+// Setup: first Enrich caches a valid product while .js 404s; the second
+// run serves the cache, then the rescue must still try .js once more.
+func TestShopifyJSRescueOnCacheHit(t *testing.T) {
+	page := "https://shop.example.com/products/cached"
+	f := &routerFetcher{
+		pages: map[string]*wowa.FetchResponse{
+			page:         {Status: 200, Body: shopifySchemaHTML},
+			page + ".js": {Status: 200, Body: shopifyJSBody},
+		},
+		once: map[string]*wowa.FetchResponse{
+			page + ".js": {Status: 404, Body: "gone"},
+		},
+	}
+	cfg := testConfig()
+	cfg.Cache = cache.New(cache.Config{L1MaxItems: 16})
+	t.Cleanup(cfg.Cache.Close)
+	p := New(f, nil, cfg)
+	cand := sources.Candidate{Source: "shopify", Title: "", URL: page}
+	out := p.Enrich(t.Context(), []sources.Candidate{cand})
+	if len(out[0].Product.Variants) != 0 {
+		t.Fatalf("first run unexpectedly had variants: %+v", out[0].Product.Variants)
+	}
+	out2 := p.Enrich(t.Context(), []sources.Candidate{cand})
+	if f.count(".js") != 2 {
+		t.Fatalf(".js fetches = %d, want 2 (once per Enrich)", f.count(".js"))
+	}
+	if len(out2[0].Product.Variants) != 3 {
+		t.Fatalf("cached product never received its variant matrix: %+v", out2[0].Product.Variants)
 	}
 }
 

@@ -81,3 +81,51 @@ func TestObserveVariantEmptyMatrix(t *testing.T) {
 		t.Fatalf("outcome = %q", obs.Outcome)
 	}
 }
+
+// A variant without an availability flag must NOT inherit the listing's
+// stock state — a sibling SKU in stock would false-fire a restock.
+func TestObserveVariantUnknownStockStaysEmpty(t *testing.T) {
+	p := variantProduct()
+	p.Variants[0].Available = nil
+	w := Watch{URL: "https://shop.example.com/products/mbp",
+		VariantSel: "5001", Currency: "USD"}
+	obs := observeVariant(w, p)
+	if obs.Availability != "" {
+		t.Fatalf("availability = %q, want empty (listing state must not leak)", obs.Availability)
+	}
+}
+
+// A watch URL carrying its own query must not grow a second "?".
+func TestObserveVariantOfferURLQuerySafe(t *testing.T) {
+	p := variantProduct()
+	p.Variants[0].URL = "" // force the fallback branch
+	w := Watch{URL: "https://shop.example.com/products/mbp?utm=x",
+		VariantSel: "5001", Currency: "USD"}
+	obs := observeVariant(w, p)
+	if obs.OfferURL != "https://shop.example.com/products/mbp?variant=5001" {
+		t.Fatalf("offer_url = %q", obs.OfferURL)
+	}
+}
+
+// The condition evaluator receives the pinned configuration — the scoped
+// product carries the variant's price/availability, never the listing's
+// min-price head.
+func TestObserveVariantScopesConditionProduct(t *testing.T) {
+	p := variantProduct()
+	w := Watch{URL: "https://shop.example.com/products/mbp",
+		VariantSel: "64GB", Currency: "USD"}
+	obs := observeVariant(w, p)
+	if obs.Product == nil || obs.Product == p {
+		t.Fatal("condition product must be a scoped copy")
+	}
+	if obs.Product.PriceMinor == nil || *obs.Product.PriceMinor != 352900 {
+		t.Fatalf("scoped price = %v, want 352900", obs.Product.PriceMinor)
+	}
+	if obs.Product.Availability != "out_of_stock" {
+		t.Fatalf("scoped availability = %q", obs.Product.Availability)
+	}
+	// The parent stays untouched for other consumers of the extraction.
+	if p.PriceMinor == nil || *p.PriceMinor != 238900 || len(p.Variants) != 2 {
+		t.Fatal("parent product mutated by pinning")
+	}
+}

@@ -108,21 +108,15 @@ func observeVariant(w Watch, p *extract.Product) Observation {
 			price = &minor
 		}
 	}
-	avail := p.Availability
-	if v.Available != nil {
-		if *v.Available {
-			avail = "in_stock"
-		} else {
-			avail = "out_of_stock"
-		}
-	}
-	offerURL := v.URL
-	if offerURL == "" && v.VariantID != "" {
-		offerURL = w.URL + "?variant=" + v.VariantID
-	}
-	if offerURL == "" {
-		offerURL = w.URL
-	}
+	avail := variantAvailability(v)
+	offerURL := variantOfferURL(w.URL, v)
+	// The condition evaluator sees the pinned configuration, not the
+	// listing's min-price head — a scoped copy, the parent is untouched.
+	scoped := *p
+	scoped.PriceMinor = price
+	scoped.Availability = avail
+	scoped.URL = offerURL
+	scoped.Variants = nil // already selected — the matrix would re-confuse the gate
 	return Observation{
 		PriceMinor:   price,
 		Currency:     cur,
@@ -130,8 +124,35 @@ func observeVariant(w Watch, p *extract.Product) Observation {
 		OfferURL:     offerURL,
 		OfferID:      w.OfferID,
 		Outcome:      OutcomeOK,
-		Product:      p,
+		Product:      &scoped,
 	}
+}
+
+// variantAvailability maps the wire flag to the canonical vocabulary.
+// Unknown stock stays empty — falling back to the listing's availability
+// would let a different SKU's state false-fire the pinned watch's
+// restock trigger.
+func variantAvailability(v *sources.Variant) string {
+	if v.Available == nil {
+		return ""
+	}
+	if *v.Available {
+		return "in_stock"
+	}
+	return "out_of_stock"
+}
+
+// variantOfferURL prefers the deep link the source emitted; otherwise it
+// composes one on the watch URL. The query is stripped first — appending
+// "?variant=" to a URL that already carries one yields a dead link.
+func variantOfferURL(watchURL string, v *sources.Variant) string {
+	if v.URL != "" {
+		return v.URL
+	}
+	if v.VariantID != "" {
+		return strings.Split(watchURL, "?")[0] + "?variant=" + v.VariantID
+	}
+	return watchURL
 }
 
 // observeQuery re-runs the watch's search and takes the cheapest passed

@@ -236,3 +236,31 @@ func TestSchemaProductGroupVariantMatrix(t *testing.T) {
 		t.Fatalf("out-of-stock variant mapped available: %+v", v)
 	}
 }
+
+// hasVariant.url is scraped content that flows to egress and notification
+// links — only absolute http(s) may survive (Devin Review #116).
+func TestSchemaVariantURLScreened(t *testing.T) {
+	const hostile = `<!doctype html><html><head><script type="application/ld+json">
+{"@context":"https://schema.org","@type":"ProductGroup","name":"x",
+ "hasVariant":[
+  {"@type":"Product","name":"evil","sku":"E1",
+   "url":"javascript:alert(1)",
+   "offers":{"@type":"Offer","price":"10.00","priceCurrency":"USD"}},
+  {"@type":"Product","name":"fine","sku":"E2",
+   "url":"https://shop.example.com/p?v=2",
+   "offers":{"@type":"Offer","price":"20.00","priceCurrency":"USD"}}]}
+</script></head><body></body></html>`
+	p, err := productFromSchema([]byte(hostile), "https://shop.example.com/products/x")
+	if err != nil {
+		t.Fatalf("productFromSchema: %v", err)
+	}
+	if len(p.Variants) != 2 {
+		t.Fatalf("variants = %+v", p.Variants)
+	}
+	if p.Variants[0].URL != "" {
+		t.Fatalf("javascript: URL survived screening: %q", p.Variants[0].URL)
+	}
+	if p.Variants[1].URL != "https://shop.example.com/p?v=2" {
+		t.Fatalf("legit https URL dropped: %q", p.Variants[1].URL)
+	}
+}

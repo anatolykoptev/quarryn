@@ -106,8 +106,15 @@ func (p *Pipeline) shopifyJSMerge(prod *Product, body string) {
 	if prod.PriceMinor == nil && best != nil {
 		prod.PriceMinor = best
 	}
-	if prod.Availability == "" && anyStock {
-		prod.Availability = "in_stock"
+	// The .js mirror knows the full stock state — an all-unavailable
+	// listing must report out_of_stock, not silently leave "" (unpinned
+	// restock watches and availability filters key on it).
+	if prod.Availability == "" {
+		if anyStock {
+			prod.Availability = "in_stock"
+		} else {
+			prod.Availability = "out_of_stock"
+		}
 	}
 }
 

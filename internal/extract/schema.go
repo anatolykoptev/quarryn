@@ -196,7 +196,12 @@ func variantFromItem(it *microdata.Item) sources.Variant {
 		v.VariantID = *s
 	}
 	if s := propStr(it, "url"); s != nil {
-		v.URL = *s
+		// hasVariant.url is untrusted scraped content that reaches egress
+		// and notification links — keep http(s) absolute URLs only.
+		if u, err := url.Parse(*s); err == nil && u.Host != "" &&
+			(u.Scheme == "https" || u.Scheme == "http") {
+			v.URL = *s
+		}
 	}
 	if offers, ok := it.GetNested("offers"); ok {
 		for _, off := range offers.Items {
