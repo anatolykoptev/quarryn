@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.0](https://github.com/anatolykoptev/quarryn/compare/v1.21.0...v1.22.0) (2026-09-28)
+
+
+### Added
+
+* **api:** url field carries the purchase page, source_url the listing ([#113](https://github.com/anatolykoptev/quarryn/issues/113)) ([bb1dc11](https://github.com/anatolykoptev/quarryn/commit/bb1dc11a29fa3a6904fadd0745af3e625b0fd4f4))
+
 ## [1.21.0](https://github.com/anatolykoptev/quarryn/compare/v1.20.0...v1.21.0) (2026-09-28)
 
 
