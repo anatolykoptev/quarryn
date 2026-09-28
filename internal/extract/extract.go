@@ -207,6 +207,11 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 	var outcome string
 	if len(prod.problems()) > 0 {
 		if cached, ok := p.cachedProduct(ctx, key); ok {
+			// A variant-less entry cached before this feature (24h TTL) or
+			// under a failed .js fetch still gets one rescue attempt —
+			// pinned watches must not ride out the TTL reporting
+			// no_offers on a listing that has a matrix.
+			p.tryShopifyVariants(ctx, c, cached, budget, c.Source == "shopify")
 			extractOutcomes.WithLabelValues("cache").Inc()
 			ec.Product = *cached
 			return ec
@@ -218,6 +223,12 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 		// outbound tracker — resolve it when the interact budget allows.
 		p.tryInteract(ctx, rank, c, &prod, browser, true)
 	}
+	// Configurator top-up (issue #115): a shopify-adapter candidate whose
+	// leg could not carry the variant matrix (UCP catalog has no option
+	// titles) still has a deterministic /products/<handle>.js mirror —
+	// one cheap JSON fetch beats a blind judge. The products.json leg and
+	// schema/hasVariant fills already populated prod.Variants above.
+	p.tryShopifyVariants(ctx, c, &prod, budget, c.Source == "shopify")
 
 	if probs := prod.problems(); len(probs) > 0 {
 		ec.ExtractionFailed = true
@@ -368,6 +379,12 @@ func (p *Pipeline) fetchDetail(ctx context.Context, c sources.Candidate, prod *P
 		return true, ""
 	default:
 		p.schemaMerge(c, resp.Body, prod)
+		// Shopify storefront: the .js mirror carries the variant matrix
+		// deterministically — and rescues name/price when the HTML had no
+		// schema.org Product at all (a share of extract_empty outcomes).
+		if len(prod.Variants) == 0 {
+			p.tryShopifyVariants(ctx, c, prod, budget, looksShopifyPage(resp.Body))
+		}
 		return false, ""
 	}
 }
@@ -700,6 +717,7 @@ func productFromCandidate(c sources.Candidate) Product {
 		Description:  c.Content,
 		Source:       domainOf(c.URL),
 		OfferID:      c.OfferID,
+		Variants:     c.Variants,
 		Method:       MethodSERP,
 	}
 }
@@ -744,6 +762,9 @@ func mergeOptional(dst *Product, src *Product) {
 	}
 	if dst.Description == "" {
 		dst.Description = src.Description
+	}
+	if len(dst.Variants) == 0 && len(src.Variants) > 0 {
+		dst.Variants = src.Variants
 	}
 	if len(dst.Raw) == 0 && len(src.Raw) > 0 {
 		dst.Raw = src.Raw

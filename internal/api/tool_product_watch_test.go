@@ -255,3 +255,29 @@ func TestWatchAddNativeID(t *testing.T) {
 		t.Error("url-derived offer_id must report native_id=false")
 	}
 }
+
+// Variant pinning (issue #115): offer-kind carries the selector into the
+// stored watch and echoes it in the entry; query-kind rejects it — a
+// re-picked cheapest offer can never honour a pin.
+func TestWatchAddVariantSelector(t *testing.T) {
+	d := watchDeps()
+	st := d.watchStore.(*fakeWatchStore)
+	a := watchArgs{Action: "add", Kind: "offer", URL: "http://192.0.2.10/p",
+		TargetPrice: 100, Currency: "USD", Variant: " 64GB "}
+	out := d.watchAdd(context.Background(), a)
+	if !out.OK {
+		t.Fatalf("variant-pinned offer add rejected: %s", out.Error)
+	}
+	if st.created.VariantSel != "64GB" {
+		t.Fatalf("stored variant_sel = %q", st.created.VariantSel)
+	}
+	if out.Watch.VariantSel != "64GB" {
+		t.Fatalf("entry variant = %q", out.Watch.VariantSel)
+	}
+
+	q := watchArgs{Action: "add", Kind: "query", Query: "mbp",
+		TargetPrice: 100, Currency: "USD", Variant: "64GB"}
+	if out := d.watchAdd(context.Background(), q); out.OK {
+		t.Fatal("variant on a query watch must be rejected")
+	}
+}

@@ -266,12 +266,42 @@ func shopifyResult(shop string, p shopifyProduct) sources.Result {
 	if len(p.Images) > 0 && p.Images[0].Src != "" {
 		md[MetaImageURL] = p.Images[0].Src
 	}
+	if enc := EncodeVariants(shopifyVariants(shop, p)); enc != "" {
+		md[MetaVariants] = enc
+	}
 	return sources.Result{
 		Title:    p.Title,
 		URL:      "https://" + shop + "/products/" + p.Handle,
 		Content:  p.Title,
 		Metadata: md,
 	}
+}
+
+// shopifyVariants maps the products.json variant list onto the wire
+// Variant shape — option label, price and availability ride through so a
+// configurator listing's real configurations reach the judge (issue #115).
+func shopifyVariants(shop string, p shopifyProduct) []Variant {
+	if len(p.Variants) == 0 {
+		return nil
+	}
+	out := make([]Variant, 0, len(p.Variants))
+	for _, v := range p.Variants {
+		if v.Title == "" || v.Title == "Default Title" {
+			continue // single-variant listing — nothing to disambiguate
+		}
+		av := v.Available
+		out = append(out, Variant{
+			Title:     v.Title,
+			VariantID: strconv.FormatInt(v.ID, 10),
+			Price:     v.Price,
+			Available: &av,
+			URL:       "https://" + shop + "/products/" + p.Handle + "?variant=" + strconv.FormatInt(v.ID, 10),
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // shopifyPrice picks the lowest in-stock variant price (falling back to the

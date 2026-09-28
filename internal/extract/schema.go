@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/anatolykoptev/go-enriche/structured"
+	"github.com/anatolykoptev/quarryn/internal/sources"
 	"github.com/astappiev/microdata"
 )
 
@@ -163,7 +164,10 @@ func productFromItem(item *microdata.Item, pageURL string) *Product {
 }
 
 // applyVariantOffers fills Product offer fields from a ProductGroup's
-// hasVariant Products; earlier variants win on conflicts.
+// hasVariant Products; earlier variants win on conflicts. The variant
+// matrix itself lands on p.Variants — a configurator's real
+// configurations (RAM/storage/etc) must reach the judge, not just the
+// lowest price (issue #115).
 func applyVariantOffers(p *Product, group *microdata.Item) {
 	vars, ok := group.GetNested("hasVariant")
 	if !ok {
@@ -173,6 +177,60 @@ func applyVariantOffers(p *Product, group *microdata.Item) {
 		if offers, ok := v.GetNested("offers"); ok {
 			for _, off := range offers.Items {
 				applyOffer(p, off)
+			}
+		}
+		if v2 := variantFromItem(v); v2.Title != "" || v2.VariantID != "" {
+			p.Variants = append(p.Variants, v2)
+		}
+	}
+}
+
+// variantFromItem maps one hasVariant Product item to the wire Variant
+// shape: name carries the option label, sku the merchant's variant id.
+func variantFromItem(it *microdata.Item) sources.Variant {
+	v := sources.Variant{}
+	if s := propStr(it, "name"); s != nil {
+		v.Title = *s
+	}
+	if s := propStr(it, "sku"); s != nil {
+		v.VariantID = *s
+	}
+	if s := propStr(it, "url"); s != nil {
+		// hasVariant.url is untrusted scraped content that reaches egress
+		// and notification links — keep http(s) absolute URLs only.
+		if u, err := url.Parse(*s); err == nil && u.Host != "" &&
+			(u.Scheme == "https" || u.Scheme == "http") {
+			v.URL = *s
+		}
+	}
+	if offers, ok := it.GetNested("offers"); ok {
+		for _, off := range offers.Items {
+			variantOfferFill(&v, off)
+		}
+	}
+	return v
+}
+
+// variantOfferFill fills the still-empty variant offer fields from one
+// nested Offer — earlier offers win, matching applyOffer precedence.
+func variantOfferFill(v *sources.Variant, off *microdata.Item) {
+	if v.Price == "" {
+		if s := propStr(off, "price", "lowPrice"); s != nil {
+			v.Price = *s
+		}
+	}
+	if v.Available == nil {
+		if s := propStr(off, "availability"); s != nil {
+			// Canonical enum only: buyable states are true, unbuyable
+			// false, unrecognized stays nil (unknown) rather than a
+			// guessed "in stock".
+			switch normalizeAvailability(*s) {
+			case "in_stock", "pre_order", "backorder", "limited":
+				t := true
+				v.Available = &t
+			case "out_of_stock", "discontinued":
+				f := false
+				v.Available = &f
 			}
 		}
 	}
