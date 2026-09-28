@@ -58,11 +58,14 @@ Price/restock watches on Postgres. `action`: `add | list | get | cancel | check_
 | `watch_id` | int | `get` / `cancel` / `check_now` target |
 | `include_inactive` | bool | `list`: include cancelled/expired |
 | `history` / `history_limit` | bool / int | `list`: attach observation history per watch (newest first). `get` always includes history. Default 100 rows, max 500 |
+| `owner` | string | Tenant scope (`tg:<chat_id>` for bot users). `add` stamps it; `list`/`get`/`cancel`/`check_now` only see own rows. Empty = unscoped fleet caller. Active watches per owner capped by `WATCH_OWNER_MAX` |
 
 Notifications POST to `WATCH_NOTIFY_URL`; `WATCH_NOTIFY_FORMAT` selects the
 payload — `alertmanager` (v4 webhook, `trigger` label `price`/`restock`) or
 `json` (flat body: `event`, `trigger`, `watch_id`, `price_minor`,
-`availability`, `summary`, …) for generic sinks like ntfy or Gotify. Offers
+`availability`, `summary`, …) for generic sinks like ntfy or Gotify.
+Watches with `owner="tg:*"` route to `BOT_NOTIFY_URL` instead —
+the bot endpoint that delivers to the right chat. Offers
 that stop being extractable become `unverifiable` after repeated failures
 and stop consuming budget. A `condition` whose evaluator is unreachable or
 rejects the observation fails closed — the check records the reason and

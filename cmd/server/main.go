@@ -112,6 +112,15 @@ func newWatcher(s *search.Searcher, pgdb *postgres.DB, cfg config.Config, initEr
 			slog.String("format", cfg.WatchNotifyFormat))
 		notifier = watch.NewAlertmanagerNotifier(cfg.WatchNotifyURL)
 	}
+	if cfg.BotNotifyURL != "" {
+		// Bot-owned watches (owner="tg:*") alert their user through the
+		// bot endpoint; fleet watches keep the default sink.
+		notifier = watch.RoutingNotifier{
+			TG:      watch.NewWebhookNotifier(cfg.BotNotifyURL),
+			Default: notifier,
+		}
+		slog.Info("watch notify: tg-owned watches route to bot", slog.String("url", cfg.BotNotifyURL))
+	}
 	st := watch.NewStore(pgdb.Pool())
 	ch := &watch.Checker{
 		Store:       st,

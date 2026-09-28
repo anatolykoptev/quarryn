@@ -117,3 +117,42 @@ func TestWebhookNotifierHTTPErrorAndRetryAfter(t *testing.T) {
 		t.Fatal("expected error on empty URL")
 	}
 }
+
+// tg-owned watches must reach the bot endpoint; fleet watches must keep
+// the default sink — a misrouted alert is a silently lost notification.
+func TestRoutingNotifier(t *testing.T) {
+	var tgHit, defHit int
+	tg := &countingNotifier{n: &tgHit}
+	def := &countingNotifier{n: &defHit}
+	r := RoutingNotifier{TG: tg, Default: def}
+	ctx := context.Background()
+	obs := Observation{Outcome: OutcomeOK}
+
+	if _, err := r.Notify(ctx, Watch{Owner: "tg:42"}, obs, "price"); err != nil {
+		t.Fatal(err)
+	}
+	if tgHit != 1 || defHit != 0 {
+		t.Fatalf("tg watch: tg=%d default=%d", tgHit, defHit)
+	}
+	if _, err := r.Notify(ctx, Watch{Owner: ""}, obs, "price"); err != nil {
+		t.Fatal(err)
+	}
+	if tgHit != 1 || defHit != 1 {
+		t.Fatalf("fleet watch: tg=%d default=%d", tgHit, defHit)
+	}
+	// No bot notifier configured → tg watch falls back to the fleet sink.
+	r.TG = nil
+	if _, err := r.Notify(ctx, Watch{Owner: "tg:42"}, obs, "price"); err != nil {
+		t.Fatal(err)
+	}
+	if defHit != 2 {
+		t.Fatalf("no-bot fallback: default=%d", defHit)
+	}
+}
+
+type countingNotifier struct{ n *int }
+
+func (c *countingNotifier) Notify(context.Context, Watch, Observation, string) (time.Duration, error) {
+	*c.n++
+	return 0, nil
+}

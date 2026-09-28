@@ -91,6 +91,11 @@ type Config struct {
 	WatchNotifyFormat string
 	WatchTick         time.Duration
 	WatchMaxPerTick   int
+	// WatchOwnerMax caps active watches per tenant owner (0 = unlimited);
+	// BotNotifyURL is the bot's delivery endpoint — watches with
+	// owner="tg:*" route their alerts there instead of WATCH_NOTIFY_URL.
+	WatchOwnerMax int
+	BotNotifyURL  string
 
 	// ToolTimeout is the default per-tool deadline; SearchToolTimeout and
 	// MatchToolTimeout override it for the product_search / product_match
@@ -142,6 +147,8 @@ func Load() Config {
 		DatabaseURL:       env.Str("DATABASE_URL", ""),
 		WatchNotifyURL:    env.Str("WATCH_NOTIFY_URL", ""),
 		WatchNotifyFormat: env.Str("WATCH_NOTIFY_FORMAT", "alertmanager"),
+		WatchOwnerMax:     env.Int("WATCH_OWNER_MAX", 25),
+		BotNotifyURL:      env.Str("BOT_NOTIFY_URL", ""),
 		WatchTick:         env.Duration("WATCH_TICK", 15*time.Minute),
 		WatchMaxPerTick:   env.Int("WATCH_MAX_PER_TICK", 10),
 		ToolTimeout:       env.Duration("TOOL_TIMEOUT", 90*time.Second),

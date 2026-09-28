@@ -10,7 +10,7 @@ type Upserter interface {
 // Ingest parses a raw email and upserts the order graph. It is the
 // single entry both transports share — the .eml POST/MCP path today, an
 // IMAP poller when mailbox creds land.
-func Ingest(ctx context.Context, st Upserter, raw []byte) (*Order, bool, error) {
+func Ingest(ctx context.Context, st Upserter, raw []byte, owner string) (*Order, bool, error) {
 	p, err := ParseEmail(raw)
 	if err != nil {
 		return nil, false, err
@@ -28,6 +28,7 @@ func Ingest(ctx context.Context, st Upserter, raw []byte) (*Order, bool, error) 
 		TrackingNo:     p.TrackingNo,
 		Carrier:        p.Carrier,
 		TrackURL:       p.TrackURL,
+		Owner:          owner,
 	}
 	if p.TrackingNo != "" {
 		o.Status = StatusShipped // tracking number means it's moving

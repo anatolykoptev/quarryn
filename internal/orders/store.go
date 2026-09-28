@@ -2,6 +2,8 @@ package orders
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -30,9 +32,9 @@ func (s *Store) Upsert(ctx context.Context, o *Order) (created bool, err error) 
 	err = tx.QueryRow(ctx, `
 		INSERT INTO orders (retailer_domain, order_no, status, placed_at,
 			total_minor, currency, label, email_from, subject, return_by,
-			tracking_no, carrier, track_url)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-		ON CONFLICT (retailer_domain, order_no) WHERE order_no <> ''
+			tracking_no, carrier, track_url, owner)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		ON CONFLICT (retailer_domain, order_no, owner) WHERE order_no <> ''
 		DO UPDATE SET
 			total_minor  = COALESCE(orders.total_minor,  EXCLUDED.total_minor),
 			currency     = COALESCE(NULLIF(orders.currency,''), EXCLUDED.currency),
@@ -46,7 +48,7 @@ func (s *Store) Upsert(ctx context.Context, o *Order) (created bool, err error) 
 		RETURNING id, created_at, (xmax = 0)`,
 		o.RetailerDomain, o.OrderNo, o.Status, o.PlacedAt,
 		o.TotalMinor, o.Currency, o.Label, o.EmailFrom, o.Subject,
-		o.ReturnBy, o.TrackingNo, o.Carrier, o.TrackURL).
+		o.ReturnBy, o.TrackingNo, o.Carrier, o.TrackURL, o.Owner).
 		Scan(&o.ID, &o.CreatedAt, &created)
 	if err != nil {
 		return false, err
@@ -87,14 +89,14 @@ func (s *Store) addEventTx(ctx context.Context, tx pgx.Tx, orderID int64, kind, 
 
 // Mark is the operator status override (delivered/returned/cancelled)
 // until carrier tracking exists.
-func (s *Store) Mark(ctx context.Context, id int64, status string) (bool, error) {
+func (s *Store) Mark(ctx context.Context, owner string, id int64, status string) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	tag, err := tx.Exec(ctx,
-		`UPDATE orders SET status=$2 WHERE id=$1 AND status<>$2`, id, status)
+		`UPDATE orders SET status=$3 WHERE id=$1 AND ($2='' OR owner=$2) AND status<>$3`, id, owner, status)
 	if err != nil || tag.RowsAffected() == 0 {
 		return false, err
 	}
@@ -106,15 +108,25 @@ func (s *Store) Mark(ctx context.Context, id int64, status string) (bool, error)
 }
 
 // List returns orders, newest first; activeOnly hides terminal states.
-func (s *Store) List(ctx context.Context, activeOnly bool) ([]Order, error) {
+// A non-empty owner scopes to that tenant; "" stays unscoped.
+func (s *Store) List(ctx context.Context, owner string, activeOnly bool) ([]Order, error) {
 	q := `SELECT id, created_at, retailer_domain, order_no, status,
 		placed_at, total_minor, currency, label, email_from, subject,
-		return_by, tracking_no, carrier, track_url FROM orders`
+		return_by, tracking_no, carrier, track_url, owner FROM orders`
+	var args []any
+	var conds []string
 	if activeOnly {
-		q += ` WHERE status NOT IN ('delivered','returned','cancelled')`
+		conds = append(conds, `status NOT IN ('delivered','returned','cancelled')`)
+	}
+	if owner != "" {
+		args = append(args, owner)
+		conds = append(conds, fmt.Sprintf("owner = $%d", len(args)))
+	}
+	if len(conds) > 0 {
+		q += ` WHERE ` + strings.Join(conds, ` AND `)
 	}
 	q += ` ORDER BY coalesce(placed_at, created_at) DESC`
-	rows, err := s.pool.Query(ctx, q)
+	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -130,13 +142,14 @@ func (s *Store) List(ctx context.Context, activeOnly bool) ([]Order, error) {
 	return out, rows.Err()
 }
 
-// Get returns one order with its event history.
-func (s *Store) Get(ctx context.Context, id int64) (Order, []Event, error) {
+// Get returns one order with its event history. A non-empty owner
+// scopes: a foreign-owner row reports ErrNoRows (no existence leak).
+func (s *Store) Get(ctx context.Context, owner string, id int64) (Order, []Event, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, created_at, retailer_domain, order_no, status,
 			placed_at, total_minor, currency, label, email_from, subject,
-			return_by, tracking_no, carrier, track_url
-		FROM orders WHERE id=$1`, id)
+			return_by, tracking_no, carrier, track_url, owner
+		FROM orders WHERE id=$1 AND ($2='' OR owner=$2)`, id, owner)
 	o, err := scanOrder(row)
 	if err != nil {
 		return o, nil, err
@@ -164,7 +177,7 @@ func scanOrder(r interface{ Scan(...any) error }) (Order, error) {
 	err := r.Scan(&o.ID, &o.CreatedAt, &o.RetailerDomain, &o.OrderNo,
 		&o.Status, &o.PlacedAt, &o.TotalMinor, &o.Currency, &o.Label,
 		&o.EmailFrom, &o.Subject, &o.ReturnBy, &o.TrackingNo, &o.Carrier,
-		&o.TrackURL)
+		&o.TrackURL, &o.Owner)
 	return o, err
 }
 
