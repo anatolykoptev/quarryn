@@ -314,6 +314,9 @@ func TestEmptyObservationSplitsTiers(t *testing.T) {
 		{"incomplete", OutcomeExtractEmpty},
 		{"invalid", OutcomeExtractEmpty},
 		{"llm_budget", OutcomeExtractEmpty},
+		// A hard 404/410 IS the "listing gone" semantic — it must keep
+		// counting toward unverifiable, not linger as transient.
+		{"gone", OutcomeExtractEmpty},
 	}
 	for _, tc := range cases {
 		obs := emptyObservation(search.Output{Candidates: []match.JudgedCandidate{jc(tc.outcome)}})
