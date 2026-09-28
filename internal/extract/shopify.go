@@ -211,11 +211,23 @@ func (p *Pipeline) shopifyJSMerge(prod *Product, body string) bool {
 	if jp.Title == "" && len(variants) == 0 {
 		return false
 	}
-	contributed := false
 	if len(variants) > 0 {
 		prod.Variants = variants
-		contributed = true
 	}
+	if shopifyJSFill(prod, &jp, best, anyStock) &&
+		(prod.Method == MethodSERP || prod.Method == MethodLLM) {
+		// The deterministic merchant doc outranks SERP metadata and an
+		// LLM guess as provenance for the fields it filled.
+		prod.Method = MethodShopifyJS
+	}
+	return true
+}
+
+// shopifyJSFill writes the product-level fields the .js doc carries,
+// reporting whether anything landed — an already-complete product gets
+// its variants but keeps its provenance.
+func shopifyJSFill(prod *Product, jp *shopifyJSProduct, best *int64, anyStock bool) bool {
+	contributed := len(prod.Variants) > 0 // caller just assigned them
 	if strings.TrimSpace(prod.Name) == "" && jp.Title != "" {
 		prod.Name = jp.Title
 		contributed = true
@@ -242,12 +254,7 @@ func (p *Pipeline) shopifyJSMerge(prod *Product, body string) bool {
 		}
 		contributed = true
 	}
-	if contributed && (prod.Method == MethodSERP || prod.Method == MethodLLM) {
-		// The deterministic merchant doc outranks SERP metadata and an
-		// LLM guess as provenance for the fields it filled.
-		prod.Method = MethodShopifyJS
-	}
-	return true
+	return contributed
 }
 
 // shopifyJSVariants maps the .js variant list to wire form, skipping
