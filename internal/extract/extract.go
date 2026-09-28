@@ -211,6 +211,7 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 	var outcome string
 	if len(prod.problems()) > 0 {
 		if cached, hit := p.serveCache(ctx, c, key, budget); hit {
+			ec.Outcome = "cache"
 			ec.Product = *cached
 			return ec
 		}
@@ -242,6 +243,7 @@ func (p *Pipeline) enrichCandidate(ctx context.Context, rank int, c sources.Cand
 		outcome = prod.Method
 	}
 	extractOutcomes.WithLabelValues(outcome).Inc()
+	ec.Outcome = outcome
 
 	// Cache only detail-extracted products that passed validation — serp
 	// merges are free to recompute, and a poisoned entry would outlive the
@@ -445,13 +447,17 @@ func (p *Pipeline) fetchDetail(ctx context.Context, c sources.Candidate, prod *P
 
 // isCFChallengeError reports whether a wowa fetch error is a bot-management
 // challenge surfaced as a transport failure rather than a CFDetected body —
-// e.g. "remote error (http 502): cloudflare managed_challenge_200".
+// e.g. "remote error (http 502): cloudflare managed_challenge_200", or the
+// solver layer reporting a clearance timeout ("solver failed: timeout
+// waiting for cf_clearance" — live signature on ebay/woot, issue #112).
 func isCFChallengeError(err error) bool {
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "cloudflare") ||
 		strings.Contains(s, "managed_challenge") ||
 		strings.Contains(s, "cf_challenge") ||
-		strings.Contains(s, "cf_detected")
+		strings.Contains(s, "cf_detected") ||
+		strings.Contains(s, "cf_clearance") ||
+		strings.Contains(s, "solver failed")
 }
 
 // renderTimeoutSecs gives the render tier more headroom than a plain fetch —

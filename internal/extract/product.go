@@ -114,6 +114,14 @@ type EnrichedCandidate struct {
 	// (EXTRACT_LLM_DAILY_MAX) was reached. Typed data, not an error — the
 	// candidate continues with whatever the cheaper tiers produced.
 	LLMBudgetExhausted bool `json:"llm_budget_exhausted,omitempty"`
+
+	// Outcome is the extract-stage disposition label — the same string the
+	// extractOutcomes metric counts ("serp", "schema", "fetch_failed",
+	// "render_failed", "over_budget", "incomplete", ...). Watchers read it
+	// to separate fetch-tier failures (transient) from a genuinely empty
+	// page (listing gone) — conflating them marked walled listings
+	// unverifiable (issue #112).
+	Outcome string `json:"outcome,omitempty"`
 }
 
 // GroupKey returns the offer-grouping identity (issue #98): a namespaced

@@ -92,9 +92,14 @@ the bot endpoint that delivers to the right chat. The payload adds
 recipient directly; `BOT_NOTIFY_SECRET` enables HMAC-V2 signing
 (`X-Webhook-Signature-V2` + `X-Webhook-Timestamp` over `<unix>.<body>`). Offers
 that stop being extractable become `unverifiable` after repeated failures
-and stop consuming budget. A `condition` whose evaluator is unreachable or
-rejects the observation fails closed — the check records the reason and
-no alert is sent.
+and stop consuming budget. Observation `outcome` splits the failure class:
+`extract_empty` means the page was reached but yielded no product (listing
+gone / too thin — counts toward `unverifiable`); `fetch_failed` covers
+fetch-tier failures (bot wall the solver could not clear, budget or render
+failure — transient, never counts). The extract stage's own disposition
+label rides in `detail` as `extract: <label>`. A `condition` whose
+evaluator is unreachable or rejects the observation fails closed — the
+check records the reason and no alert is sent.
 
 ### `product_order`
 
