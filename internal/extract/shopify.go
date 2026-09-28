@@ -58,6 +58,8 @@ type shopifyJSProduct struct {
 	Title       string             `json:"title"`
 	Vendor      string             `json:"vendor"`
 	Description string             `json:"description"` // HTML — kept off egress fields
+	Available   bool               `json:"available"`
+	PriceMin    int64              `json:"price_min"` // minor units, like variant prices
 	Variants    []shopifyJSVariant `json:"variants"`
 }
 
@@ -95,7 +97,7 @@ func (p *Pipeline) tryShopifyVariants(ctx context.Context, c sources.Candidate, 
 	// still resolves to a /products/<handle>.js shape (bounds the hop to
 	// the same endpoint family, never an arbitrary target).
 	if resp.Status >= 300 && resp.Status < 400 {
-		if next := shopifyJSURL(resolveLocation(jsURL, headerLocation(resp.Headers))); next != "" && next != jsURL {
+		if next := redirectShopifyJS(jsURL, headerLocation(resp.Headers)); next != "" {
 			if r2, err := p.fetch.Fetch(ctx, wowa.FetchRequest{
 				URL:         next,
 				TimeoutSecs: p.cfg.FetchTimeoutSecs,
@@ -151,6 +153,29 @@ func headerLocation(h map[string]string) string {
 	return ""
 }
 
+// redirectShopifyJS resolves a redirect target for the .js probe and
+// refuses anything that is not a same-storefront product mirror. The
+// host must match modulo www (shopify's canonical-host normalization);
+// the path must keep the /products/<handle>.js shape. Both checks
+// together bound the hop: a Location pointing at a private IP or a
+// different endpoint family is dropped.
+func redirectShopifyJS(from, loc string) string {
+	next := shopifyJSURL(resolveLocation(from, loc))
+	if next == "" || next == from {
+		return ""
+	}
+	src, err1 := url.Parse(from)
+	dst, err2 := url.Parse(next)
+	if err1 != nil || err2 != nil || dst.Host == "" {
+		return ""
+	}
+	strip := func(h string) string { return strings.TrimPrefix(strings.ToLower(h), "www.") }
+	if strip(src.Host) != strip(dst.Host) {
+		return ""
+	}
+	return next
+}
+
 // resolveLocation resolves a possibly-relative Location target against
 // the URL that produced it.
 func resolveLocation(from, loc string) string {
@@ -173,34 +198,53 @@ func resolveLocation(from, loc string) string {
 // name/price/availability when still missing — this is also the rescue for
 // shopify pages whose HTML carries no schema.org Product (the endpoint
 // answers even when the storefront page is thin or challenge-walled).
-// Returns whether the payload contributed anything.
+// Single-variant products ship as "Default Title" — filtered from the
+// matrix but still carrying the product's price/stock in the top-level
+// fields. Returns whether the payload was a real product doc at all —
+// an empty {} is not worth a currency probe.
 func (p *Pipeline) shopifyJSMerge(prod *Product, body string) bool {
 	var jp shopifyJSProduct
 	if err := json.Unmarshal([]byte(body), &jp); err != nil {
 		return false
 	}
 	variants, best, anyStock := shopifyJSVariants(prod.URL, jp.Variants)
-	if len(variants) == 0 {
+	if jp.Title == "" && len(variants) == 0 {
 		return false
 	}
-	prod.Variants = variants
+	contributed := false
+	if len(variants) > 0 {
+		prod.Variants = variants
+		contributed = true
+	}
 	if strings.TrimSpace(prod.Name) == "" && jp.Title != "" {
 		prod.Name = jp.Title
+		contributed = true
 	}
-	if prod.PriceMinor == nil && best != nil {
-		prod.PriceMinor = best
+	if prod.PriceMinor == nil {
+		// best = lowest in-stock variant price; price_min covers the
+		// Default-Title shape and all-OOS matrices.
+		if best == nil && jp.PriceMin > 0 {
+			best = &jp.PriceMin
+		}
+		if best != nil {
+			prod.PriceMinor = best
+			contributed = true
+		}
 	}
 	// The .js mirror knows the full stock state — an all-unavailable
 	// listing must report out_of_stock, not silently leave "" (unpinned
 	// restock watches and availability filters key on it).
 	if prod.Availability == "" {
-		if anyStock {
+		if anyStock || jp.Available {
 			prod.Availability = "in_stock"
 		} else {
 			prod.Availability = "out_of_stock"
 		}
+		contributed = true
 	}
-	if prod.Method == MethodSERP {
+	if contributed && (prod.Method == MethodSERP || prod.Method == MethodLLM) {
+		// The deterministic merchant doc outranks SERP metadata and an
+		// LLM guess as provenance for the fields it filled.
 		prod.Method = MethodShopifyJS
 	}
 	return true

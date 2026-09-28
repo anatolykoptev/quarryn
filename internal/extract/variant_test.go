@@ -99,7 +99,7 @@ func TestShopifyJSRescueFetchesOnce(t *testing.T) {
 	page := "https://shop.example.com/products/widget"
 	f := &routerFetcher{pages: map[string]*wowa.FetchResponse{
 		page:         {Status: 200, Body: shopifyPageHTML},
-		page + ".js": {Status: 200, Body: `{"title":"x","variants":[]}`},
+		page + ".js": {Status: 200, Body: `{"variants":[]}`},
 	}}
 	p := New(f, nil, testConfig())
 	out := p.Enrich(t.Context(), []sources.Candidate{
@@ -322,6 +322,65 @@ func TestShopifyJSRefusesForeignRedirect(t *testing.T) {
 	})
 	if len(out[0].Product.Variants) != 0 {
 		t.Fatalf("followed a non-.js redirect: %+v", out[0].Product.Variants)
+	}
+}
+
+// Single-variant products ship as "Default Title" — filtered from the
+// matrix, but the top-level price_min/available still rescue the
+// product fields (the most common storefront shape).
+func TestShopifyJSRescuesDefaultTitleProduct(t *testing.T) {
+	page := "https://walled.example.com/products/tee"
+	f := &routerFetcher{pages: map[string]*wowa.FetchResponse{
+		page: {Status: 403, Body: "<html>cf challenge</html>"},
+		page + ".js": {Status: 200, Body: `{
+			"title": "Pocket Tee", "available": true, "price_min": 2500,
+			"variants": [{"id": 9, "title": "Default Title", "price": 2500, "available": true}]
+		}`},
+		"https://walled.example.com/cart.js": {Status: 200, Body: `{"currency":"USD"}`},
+	}}
+	p := New(f, nil, testConfig())
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		{Source: "direct", URL: page},
+	})
+	got := out[0]
+	if got.ExtractionFailed {
+		t.Fatalf("default-title rescue failed: %s", got.FailureReason)
+	}
+	if got.Product.Name != "Pocket Tee" || got.Product.PriceMinor == nil ||
+		*got.Product.PriceMinor != 2500 || got.Product.Currency != "USD" {
+		t.Fatalf("rescued product = %+v", got.Product)
+	}
+	if got.Product.Availability != "in_stock" {
+		t.Fatalf("availability = %q", got.Product.Availability)
+	}
+	if len(got.Product.Variants) != 0 {
+		t.Fatalf("placeholder must not become a variant: %+v", got.Product.Variants)
+	}
+}
+
+// A redirect off the storefront host is refused — a Location pointing at
+// a private or foreign host with a products-shaped path must never be
+// fetched through the probe.
+func TestShopifyJSRefusesCrossHostRedirect(t *testing.T) {
+	page := "https://walled.example.com/products/mbp"
+	f := &routerFetcher{pages: map[string]*wowa.FetchResponse{
+		page: {Status: 403, Body: "<html>cf challenge</html>"},
+		page + ".js": {
+			Status:  301,
+			Headers: map[string]string{"Location": "http://169.254.169.254/products/mbp.js"},
+		},
+		// Bait: following the raw cross-host Location lands here.
+		"http://169.254.169.254/products/mbp.js": {Status: 200, Body: shopifyJSBody},
+	}}
+	p := New(f, nil, testConfig())
+	out := p.Enrich(t.Context(), []sources.Candidate{
+		{Source: "direct", URL: page},
+	})
+	if len(out[0].Product.Variants) != 0 {
+		t.Fatalf("followed a cross-host redirect: %+v", out[0].Product.Variants)
+	}
+	if f.count("169.254") != 0 {
+		t.Fatalf("private host fetched via redirect: %v", f.seen)
 	}
 }
 

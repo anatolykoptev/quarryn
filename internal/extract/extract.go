@@ -266,14 +266,16 @@ func cacheableMethod(m string) bool {
 // (the UCP leg has no option titles) AND any URL with the canonical
 // product path shape — a direct product_match on a walled shopify page
 // still reaches the JSON asset that answers (one bounded 404 on foreign
-// hosts). When the merge delivers the required fields outright, the
-// page-tier failure disposition clears: match excludes NeedsRender
-// candidates (match.go) and the metric would misreport a healthy
-// extraction. LLM/render rescues keep their flag — only the
-// deterministic merchant payload earns the clear.
+// hosts). When the merge delivers the fields the page tiers lost, the
+// failure disposition clears: match excludes NeedsRender candidates
+// (match.go) and the metric would misreport a healthy extraction.
+// Because the probe is the only mutation between the two problems()
+// reads, completing a partially LLM-filled product clears the flag too
+// — the deterministic merchant payload outranks the guess.
 func (p *Pipeline) shopifyRescue(ctx context.Context, c sources.Candidate, prod *Product, ec *EnrichedCandidate, outcome string, budget *atomic.Int64) string {
+	wasIncomplete := len(prod.problems()) > 0
 	p.tryShopifyVariants(ctx, c, prod, budget, shopifySuspected(c))
-	if prod.Method == MethodShopifyJS && len(prod.problems()) == 0 {
+	if wasIncomplete && len(prod.problems()) == 0 {
 		ec.NeedsRender = false
 		return ""
 	}
