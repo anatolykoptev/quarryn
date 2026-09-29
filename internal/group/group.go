@@ -140,9 +140,10 @@ func (a *Assigner) assignOne(ctx context.Context, i int, p extract.Product, text
 			groupAssign.WithLabelValues("embed", "joined").Inc()
 			return Assignment{GroupID: gid, Exact: key != "", Sim: sim}
 		}
-		if c := matchPending(*pending, text, rows, vec, key, a.thrStrong, a.thrWeak); c != nil {
+		if c, sim := matchPending(*pending, text, rows, vec, key, a.thrStrong, a.thrWeak); c != nil {
+			m.Match = matchLabel(sim) // same provenance form as stored joins
 			c.add(i, vec, m, key)
-			return Assignment{GroupID: -1, Exact: key != ""} // resolved at flush
+			return Assignment{GroupID: -1, Exact: key != "", Sim: sim} // resolved at flush
 		}
 	}
 	// A keyless, unembeddable name has nothing a later offer could match
@@ -301,7 +302,7 @@ func (a *Assigner) memberAgrees(ctx context.Context, gid int64, text string, row
 // matchPending applies the same recall+gate bar against clusters forming
 // in this result set, so two keyless offers of one product group together
 // even when neither has been seen before.
-func matchPending(pending []*pendingCluster, text string, rows []string, vec []float32, key string, thrStrong, thrWeak float32) *pendingCluster {
+func matchPending(pending []*pendingCluster, text string, rows []string, vec []float32, key string, thrStrong, thrWeak float32) (*pendingCluster, float32) {
 	var best *pendingCluster
 	var bestSim float32
 	for _, p := range pending {
@@ -325,7 +326,7 @@ func matchPending(pending []*pendingCluster, text string, rows []string, vec []f
 			best, bestSim = p, sim
 		}
 	}
-	return best
+	return best, bestSim
 }
 
 // join persists membership in an existing group; store errors are logged
