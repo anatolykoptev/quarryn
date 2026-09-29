@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.0](https://github.com/anatolykoptev/quarryn/compare/v1.25.1...v1.26.0) (2026-09-29)
+
+
+### Added
+
+* persistent cross-store grouping via pgvector + embed-tier recall ([#98](https://github.com/anatolykoptev/quarryn/issues/98)) ([#132](https://github.com/anatolykoptev/quarryn/issues/132)) ([cd0af70](https://github.com/anatolykoptev/quarryn/commit/cd0af702493648aaeb05f4b07ee0498bcb2884c3))
+
 ## [1.25.1](https://github.com/anatolykoptev/quarryn/compare/v1.25.0...v1.25.1) (2026-09-28)
 
 
