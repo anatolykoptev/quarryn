@@ -98,11 +98,18 @@ func applyAssignments(results []productResult, assigns []group.Assignment) {
 // "key" when any member carried an exact identifier (the claim it was
 // resolved under), and match="exact" marks that provenance; pure
 // vector-matched groups report match="embedding" and no key.
+//
+// Results left unassigned — store outage or a claim that failed — still
+// fall back to ephemeral exact-key grouping, so a registry problem can
+// never remove offers from the comparison the pre-registry buildGroups
+// would have produced.
 func buildAssignedGroups(results []productResult) []productGroup {
 	byID := make(map[int64][]productResult)
 	var order []int64
+	var orphan []productResult
 	for _, r := range results {
 		if r.GroupID == 0 {
+			orphan = append(orphan, r)
 			continue
 		}
 		if _, seen := byID[r.GroupID]; !seen {
@@ -141,7 +148,7 @@ func buildAssignedGroups(results []productResult) []productGroup {
 		g.BestOffer = bestOffer(g.Offers)
 		groups = append(groups, g)
 	}
-	return groups
+	return append(groups, buildGroups(orphan)...)
 }
 
 // project maps one ranked candidate to the egress-safe result shape.
@@ -197,7 +204,7 @@ func buildGroups(results []productResult) []productGroup {
 	for _, key := range order {
 		members := byKey[key]
 		stores := make(map[string]struct{}, len(members))
-		g := productGroup{Key: key}
+		g := productGroup{Key: key, Match: "exact"}
 		for _, m := range members {
 			stores[m.Source] = struct{}{}
 			g.Offers = append(g.Offers, groupOffer{

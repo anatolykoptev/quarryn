@@ -39,11 +39,13 @@ func embeddable(text string) bool {
 	return len(alnumTokens(text)) >= 2
 }
 
-// evidenceRows is the spec-gate input for a product: the bare name first
-// (a name-only listing must stay comparable), then name+variant rows so
-// per-configuration specs can pair with the other side's rows.
+// evidenceRows is the spec-gate input for a product. A product with
+// variants contributes only name+variant rows: the disclosed
+// configurations ARE its identity evidence, and keeping the spec-free
+// bare name would let the existential row-pairing bypass every variant
+// gate. A variant-less product's bare name is its only evidence.
 func evidenceRows(p extract.Product) []string {
-	rows := []string{clipRunes(p.Name)}
+	var rows []string
 	for _, v := range p.Variants {
 		if len(rows) >= gateRowMax {
 			break
@@ -51,6 +53,9 @@ func evidenceRows(p extract.Product) []string {
 		if t := strings.TrimSpace(v.Title); t != "" {
 			rows = append(rows, clipRunes(p.Name+" "+t))
 		}
+	}
+	if len(rows) == 0 {
+		rows = append(rows, clipRunes(p.Name))
 	}
 	return rows
 }

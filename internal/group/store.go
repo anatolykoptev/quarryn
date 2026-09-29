@@ -121,6 +121,27 @@ func (s *Store) GroupByKey(ctx context.Context, exactKey string) (int64, error) 
 	return id, err
 }
 
+// GroupKeys lists the exact-identifier claims a group holds — the
+// keyspace-conflict gate consults it before letting a keyed offer join
+// through embedding.
+func (s *Store) GroupKeys(ctx context.Context, gid int64) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT exact_key FROM product_group_keys WHERE group_id = $1`, gid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
 // Nearest returns the k groups whose centroids sit closest to vec under
 // cosine distance, restricted to rows embedded by the current model —
 // vectors from a different model live in a different space and must never
@@ -192,18 +213,52 @@ func (s *Store) MemberTexts(ctx context.Context, gid int64, limit int) ([]Member
 }
 
 // CreateGroup inserts a new group with its seed member and exact-key
-// claims in one transaction. If a key was concurrently claimed by another
-// group the claim is skipped — the member row still lands on this group
-// (last-writer key claims would silently misdirect future exact lookups;
-// a skipped claim only forfeits the fast path, embedding can still join).
+// claims in one transaction. A key another group claimed concurrently
+// (ON CONFLICT hit) resolves the whole attempt to that winner instead:
+// the new row is rolled back and the member lands on the group the key
+// points at — otherwise the loser group would persist as an unreachable
+// duplicate with a stranded member. The returned id is always the group
+// the member actually joined.
 func (s *Store) CreateGroup(ctx context.Context, label string, vec []float32, model string, m Member, exactKeys []string) (int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
 
-	var gid int64
+	gid, winner, err := seedGroup(ctx, tx, label, vec, model, m, exactKeys)
+	if err != nil {
+		return 0, err
+	}
+	if winner == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return 0, err
+		}
+		committed = true
+		return gid, nil
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		return 0, err
+	}
+	// Retry all claims on the winner — the conflicting ones DO NOTHING,
+	// the rest (a different keyspace the same product legitimately
+	// carries) attach there instead of being dropped with our rollback.
+	if err := s.AddMember(ctx, winner, m, vec, exactKeys); err != nil {
+		return 0, fmt.Errorf("group store: claim redirect to %d: %w", winner, err)
+	}
+	return winner, nil
+}
+
+// seedGroup performs the group+member+claim inserts inside tx and then
+// audits the claims: a key another group won under us (its claim
+// committed while our INSERT waited on the unique index) reports the
+// winner's group id so the caller can roll back and redirect.
+func seedGroup(ctx context.Context, tx pgx.Tx, label string, vec []float32, model string, m Member, exactKeys []string) (gid, winner int64, err error) {
 	var vecArg any
 	members := 0 // centroid sample count — vectors folded so far
 	if len(vec) > 0 {
@@ -215,24 +270,37 @@ func (s *Store) CreateGroup(ctx context.Context, label string, vec []float32, mo
 		VALUES ($1, $2::vector, $3, $4) RETURNING id`,
 		label, vecArg, model, members).Scan(&gid)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	if err := insertMember(ctx, tx, gid, m); err != nil {
-		return 0, err
+	if _, err := insertMember(ctx, tx, gid, m); err != nil {
+		return 0, 0, err
 	}
 	for _, k := range exactKeys {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO product_group_keys (exact_key, group_id)
 			VALUES ($1, $2) ON CONFLICT (exact_key) DO NOTHING`, k, gid); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 	}
-	return gid, tx.Commit(ctx)
+	for _, k := range exactKeys {
+		var owner int64
+		err := tx.QueryRow(ctx,
+			`SELECT group_id FROM product_group_keys WHERE exact_key = $1`, k).Scan(&owner)
+		if err != nil {
+			return 0, 0, err
+		}
+		if owner != gid && (winner == 0 || owner < winner) {
+			winner = owner
+		}
+	}
+	return gid, winner, nil
 }
 
-// AddMember records an offer's membership and, when vec is present,
-// advances the group centroid by a running mean — e5 vectors are
-// L2-normalised so the renormalised mean stays a valid centroid.
+// AddMember records an offer's membership and, when the member is new and
+// carries vec, advances the group centroid by a running mean — e5 vectors
+// are L2-normalised so the renormalised mean stays a valid centroid. A
+// re-seen URL refreshes last_seen but never re-folds: frequently searched
+// offers must not skew the representative.
 func (s *Store) AddMember(ctx context.Context, gid int64, m Member, vec []float32, exactKeys []string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -240,7 +308,11 @@ func (s *Store) AddMember(ctx context.Context, gid int64, m Member, vec []float3
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if len(vec) > 0 {
+	inserted, err := insertMember(ctx, tx, gid, m)
+	if err != nil {
+		return err
+	}
+	if inserted && len(vec) > 0 {
 		var emb string
 		var n int
 		err := tx.QueryRow(ctx,
@@ -273,9 +345,6 @@ func (s *Store) AddMember(ctx context.Context, gid int64, m Member, vec []float3
 		// A stored vector of a different dimension belongs to another
 		// model space — leave the centroid untouched.
 	}
-	if err := insertMember(ctx, tx, gid, m); err != nil {
-		return err
-	}
 	for _, k := range exactKeys {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO product_group_keys (exact_key, group_id)
@@ -286,19 +355,25 @@ func (s *Store) AddMember(ctx context.Context, gid int64, m Member, vec []float3
 	return tx.Commit(ctx)
 }
 
-// insertMember upserts the offer row — the same URL seen again only
-// refreshes last_seen.
-func insertMember(ctx context.Context, tx pgx.Tx, gid int64, m Member) error {
-	_, err := tx.Exec(ctx, `
+// insertMember inserts the offer row, reporting whether it was new. A
+// re-seen URL only refreshes last_seen; the first-seen match provenance
+// stands — re-attaching through a different tier does not rewrite how
+// the member originally joined.
+func insertMember(ctx context.Context, tx pgx.Tx, gid int64, m Member) (bool, error) {
+	var inserted bool
+	err := tx.QueryRow(ctx, `
 		INSERT INTO product_group_members (group_id, url, domain, title, evidence, match)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (group_id, url)
-		DO UPDATE SET last_seen = now(),
-			match = CASE WHEN product_group_members.match IN ('exact', 'seed')
-			             THEN product_group_members.match
-			             ELSE EXCLUDED.match END`,
-		gid, m.URL, m.Domain, m.Title, m.Evidence, m.Match)
-	return err
+		ON CONFLICT (group_id, url) DO NOTHING
+		RETURNING true`,
+		gid, m.URL, m.Domain, m.Title, m.Evidence, m.Match).Scan(&inserted)
+	if errors.Is(err, pgx.ErrNoRows) {
+		_, uerr := tx.Exec(ctx,
+			`UPDATE product_group_members SET last_seen = now() WHERE group_id = $1 AND url = $2`,
+			gid, m.URL)
+		return false, uerr
+	}
+	return inserted, err
 }
 
 // l2norm normalises in place — a shared helper so the centroid write path

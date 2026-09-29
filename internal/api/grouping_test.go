@@ -99,6 +99,26 @@ func TestBuildAssignedGroupsEmbeddingMatch(t *testing.T) {
 	}
 }
 
+func TestBuildAssignedGroupsOrphanFallback(t *testing.T) {
+	// Registry outage: the assigner left every result unassigned —
+	// keyed offers must still surface through the ephemeral exact-key
+	// path rather than vanish from groups entirely.
+	results := []productResult{
+		{URL: "https://a.com/1", GroupKey: "gtin:4006381333931", Passed: true,
+			PublicProduct: extract.PublicProduct{Source: "a.com", PriceMinor: int64p(27900), Currency: "USD"}},
+		{URL: "https://b.com/2", GroupKey: "gtin:4006381333931", Passed: true,
+			PublicProduct: extract.PublicProduct{Source: "b.com", PriceMinor: int64p(25199), Currency: "USD"}},
+	}
+	groups := buildAssignedGroups(results)
+	if len(groups) != 1 {
+		t.Fatalf("orphan keyed results must still group: %+v", groups)
+	}
+	g := groups[0]
+	if g.ID != 0 || g.Key != "gtin:4006381333931" || g.Match != "exact" {
+		t.Fatalf("ephemeral group = %+v", g)
+	}
+}
+
 func int64p(v int64) *int64 { return &v }
 
 func TestBestOfferSkipsFailed(t *testing.T) {

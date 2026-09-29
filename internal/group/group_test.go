@@ -25,6 +25,7 @@ type fakeGroup struct {
 	label   string
 	vec     []float32
 	model   string
+	keys    []string
 	members []Member
 }
 
@@ -34,6 +35,13 @@ func newFakeStore() *fakeStore {
 
 func (f *fakeStore) GroupByKey(_ context.Context, key string) (int64, error) {
 	return f.byKey[key], nil
+}
+
+func (f *fakeStore) GroupKeys(_ context.Context, gid int64) ([]string, error) {
+	if g := f.groups[gid]; g != nil {
+		return g.keys, nil
+	}
+	return nil, nil
 }
 
 func (f *fakeStore) Nearest(_ context.Context, vec []float32, model string, k int) ([]Candidate, error) {
@@ -70,9 +78,16 @@ func (f *fakeStore) CreateGroup(_ context.Context, label string, vec []float32, 
 	if f.failNext {
 		return 0, errors.New("pg down")
 	}
+	// Mirror the real store's lost-claim redirect: a key already owned by
+	// another group resolves the whole create to that owner.
+	for _, k := range keys {
+		if owner, taken := f.byKey[k]; taken {
+			return owner, f.AddMember(context.Background(), owner, m, vec, nil)
+		}
+	}
 	id := f.nextID
 	f.nextID++
-	f.groups[id] = &fakeGroup{label: label, vec: vec, model: model, members: []Member{m}}
+	f.groups[id] = &fakeGroup{label: label, vec: vec, model: model, keys: keys, members: []Member{m}}
 	for _, k := range keys {
 		f.byKey[k] = id
 	}
@@ -85,9 +100,17 @@ func (f *fakeStore) AddMember(_ context.Context, gid int64, m Member, _ []float3
 		return errors.New("pg down")
 	}
 	g := f.groups[gid]
+	for _, e := range g.members {
+		if e.URL == m.URL {
+			return nil // re-seen URL refreshes, never duplicates
+		}
+	}
 	g.members = append(g.members, m)
 	for _, k := range keys {
-		f.byKey[k] = gid
+		if _, taken := f.byKey[k]; !taken {
+			f.byKey[k] = gid
+			g.keys = append(g.keys, k)
+		}
 	}
 	f.joins++
 	return nil
@@ -367,6 +390,116 @@ func TestAssignNoChains(t *testing.T) {
 	})
 	if out[0].GroupID == out[2].GroupID && out[0].GroupID != 0 {
 		t.Fatalf("chaining must not merge XM5 and XM4 through the generic name: %+v", out)
+	}
+}
+
+func TestAssignDifferentIdentifiersNoMerge(t *testing.T) {
+	st := newFakeStore()
+	// Same product name, near-identical vectors — but the two listings
+	// carry DIFFERENT GTINs (e.g. color SKUs). Embeddings must never fold
+	// two identifiers into one group.
+	emb := fakeEmb{vecs: map[string][]float32{
+		"Sony WH-1000XM5 black":  {1, 0, 0, 0},
+		"Sony WH-1000XM5 silver": {0.99, 0.1, 0, 0},
+	}}
+	a := NewAssigner(st, emb, "test", 0.90, 0.94, 5)
+	p1 := prod("Sony WH-1000XM5 black", "https://a.com/1", "a.com")
+	p1.GTIN = "4006381333931"
+	p2 := prod("Sony WH-1000XM5 silver", "https://b.com/2", "b.com")
+	p2.GTIN = "5901234123457"
+	out := assign(t, a, []extract.Product{p1, p2})
+	if out[0].GroupID == 0 || out[1].GroupID == 0 {
+		t.Fatalf("each keyed product gets a group: %+v", out)
+	}
+	if out[0].GroupID == out[1].GroupID {
+		t.Fatalf("distinct GTINs must never merge via embedding: %+v", out)
+	}
+	g1 := out[0].GroupID
+	// Stored-level path: a later search with yet another GTIN but the
+	// same product name must not join the persisted group either — the
+	// claimed keyspace blocks it at matchStored.
+	emb.vecs["Sony WH-1000XM5 white"] = []float32{0.98, 0.15, 0, 0}
+	p3 := prod("Sony WH-1000XM5 white", "https://c.com/3", "c.com")
+	p3.GTIN = "0887273790193" // valid UPC-A check digit
+	out = assign(t, a, []extract.Product{p3})
+	if out[0].GroupID == 0 {
+		t.Fatalf("new identifier must still create a group: %+v", out[0])
+	}
+	if out[0].GroupID == g1 {
+		t.Fatal("conflicting GTIN joined the claimed group")
+	}
+}
+
+func TestAssignCrossKeyspaceMerges(t *testing.T) {
+	st := newFakeStore()
+	// A GTIN-carrying offer and an MPN-carrying offer of one product:
+	// different keyspaces do NOT conflict — a product legitimately has
+	// several identifier types, and the group claims both.
+	emb := fakeEmb{vecs: map[string][]float32{
+		"Sony WH-1000XM5 headphones":  {1, 0, 0, 0},
+		"Sony WH-1000XM5 headphones.": {0.99, 0.1, 0, 0},
+	}}
+	a := NewAssigner(st, emb, "test", 0.90, 0.94, 5)
+	p1 := prod("Sony WH-1000XM5 headphones", "https://a.com/1", "a.com")
+	p1.GTIN = "4006381333931"
+	p2 := prod("Sony WH-1000XM5 headphones.", "https://b.com/2", "b.com")
+	p2.MPN = "WH1000XM5"
+	out := assign(t, a, []extract.Product{p1, p2})
+	if out[0].GroupID == 0 || out[1].GroupID != out[0].GroupID {
+		t.Fatalf("cross-keyspace identifiers of one product must merge: %+v", out)
+	}
+	gid := out[0].GroupID
+	if st.byKey["gtin:4006381333931"] != gid || st.byKey["mpn:wh1000xm5"] != gid {
+		t.Fatalf("group must claim both keys: %v", st.byKey)
+	}
+}
+
+func TestAssignVariantRowsContradict(t *testing.T) {
+	st := newFakeStore()
+	// Two listings of the same model line disclosing DISJOINT config
+	// sets — the bare name must not launder the contradiction.
+	emb := fakeEmb{vecs: map[string][]float32{
+		"MacBook Pro M5":  {1, 0, 0, 0},
+		"MacBook Pro M5 ": {0.99, 0.1, 0, 0},
+	}}
+	a := NewAssigner(st, emb, "test", 0.90, 0.94, 5)
+	p1 := prod("MacBook Pro M5", "https://a.com/1", "a.com")
+	p1.Variants = []sources.Variant{{Title: "24GB RAM / 1TB SSD"}}
+	p2 := prod("MacBook Pro M5 ", "https://b.com/2", "b.com")
+	p2.Variants = []sources.Variant{{Title: "64GB RAM / 2TB SSD"}}
+	out := assign(t, a, []extract.Product{p1, p2})
+	if out[0].GroupID == out[1].GroupID && out[0].GroupID != 0 {
+		t.Fatalf("disjoint config sets must not merge via the bare name: %+v", out)
+	}
+}
+
+func TestAssignRepeatMemberNoDup(t *testing.T) {
+	st := newFakeStore()
+	emb := fakeEmb{vecs: map[string][]float32{"Sony WH-1000XM5": {1, 0, 0, 0}}}
+	a := NewAssigner(st, emb, "test", 0.90, 0.94, 5)
+	p := prod("Sony WH-1000XM5", "https://a.com/1", "a.com")
+	out1 := assign(t, a, []extract.Product{p})
+	out2 := assign(t, a, []extract.Product{p})
+	if out2[0].GroupID != out1[0].GroupID {
+		t.Fatalf("repeat search must re-resolve the same group: %v vs %v", out1[0], out2[0])
+	}
+	if n := len(st.groups[out1[0].GroupID].members); n != 1 {
+		t.Fatalf("re-seen URL must not duplicate membership: %d members", n)
+	}
+}
+
+func TestKeyConflicts(t *testing.T) {
+	if !keyConflicts("gtin:a", []string{"gtin:b"}) {
+		t.Error("same keyspace different value must conflict")
+	}
+	if keyConflicts("gtin:a", []string{"mpn:b"}) {
+		t.Error("different keyspace is no conflict")
+	}
+	if keyConflicts("gtin:a", []string{"gtin:a"}) {
+		t.Error("identical key is no conflict")
+	}
+	if keyConflicts("", []string{"gtin:b"}) || keyConflicts("gtin:a", nil) {
+		t.Error("empty side never conflicts")
 	}
 }
 

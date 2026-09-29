@@ -38,6 +38,7 @@ var groupAssign = promauto.NewCounterVec(prometheus.CounterOpts{
 // it for pgvector; tests substitute an in-memory fake.
 type groupStore interface {
 	GroupByKey(ctx context.Context, exactKey string) (int64, error)
+	GroupKeys(ctx context.Context, gid int64) ([]string, error)
 	Nearest(ctx context.Context, vec []float32, model string, k int) ([]Candidate, error)
 	MemberTexts(ctx context.Context, gid int64, limit int) ([]Member, error)
 	CreateGroup(ctx context.Context, label string, vec []float32, model string, m Member, exactKeys []string) (int64, error)
@@ -128,15 +129,18 @@ func (a *Assigner) assignOne(ctx context.Context, i int, p extract.Product, text
 			return Assignment{GroupID: gid, Exact: true}
 		}
 	}
-	// Embedding tier: stored groups then in-set pending clusters.
+	// Embedding tier: stored groups then in-set pending clusters. A
+	// product carrying an exact key may only join groups that do not
+	// claim a conflicting key of the same keyspace — embeddings must
+	// never merge two distinct identifiers into one group.
 	if vec != nil {
-		if gid, sim, ok := a.matchStored(ctx, text, rows, vec); ok {
+		if gid, sim, ok := a.matchStored(ctx, text, rows, vec, key); ok {
 			m.Match = matchLabel(sim)
 			a.join(ctx, gid, m, vec, exactKeys(key))
 			groupAssign.WithLabelValues("embed", "joined").Inc()
 			return Assignment{GroupID: gid, Exact: key != "", Sim: sim}
 		}
-		if c := matchPending(*pending, text, rows, vec, a.thrStrong, a.thrWeak); c != nil {
+		if c := matchPending(*pending, text, rows, vec, key, a.thrStrong, a.thrWeak); c != nil {
 			c.add(i, vec, m, key)
 			return Assignment{GroupID: -1, Exact: key != ""} // resolved at flush
 		}
@@ -219,7 +223,7 @@ func (c *pendingCluster) centroid() []float32 {
 // check (single-linkage drift bound); at least one stored member must
 // additionally agree on both discriminators and specs — a group is only
 // as permissive as its own members' evidence.
-func (a *Assigner) matchStored(ctx context.Context, text string, rows []string, vec []float32) (int64, float32, bool) {
+func (a *Assigner) matchStored(ctx context.Context, text string, rows []string, vec []float32, key string) (int64, float32, bool) {
 	cands, err := a.store.Nearest(ctx, vec, a.model, a.topK)
 	if err != nil {
 		slog.Warn("group: nearest lookup failed", slog.Any("error", err))
@@ -245,9 +249,28 @@ func (a *Assigner) matchStored(ctx context.Context, text string, rows []string, 
 			groupAssign.WithLabelValues("embed", "gate_rejected").Inc()
 			continue
 		}
+		if a.claimConflicts(ctx, c.ID, key) {
+			groupAssign.WithLabelValues("embed", "gate_rejected").Inc()
+			continue
+		}
 		return c.ID, sim, true
 	}
 	return 0, 0, false
+}
+
+// claimConflicts refuses the merge when the target group already claims
+// a different identifier of the same keyspace — vector similarity must
+// never fold two GTINs into one product.
+func (a *Assigner) claimConflicts(ctx context.Context, gid int64, key string) bool {
+	if key == "" {
+		return false
+	}
+	keys, err := a.store.GroupKeys(ctx, gid)
+	if err != nil {
+		slog.Warn("group: keyset fetch failed", slog.Int64("group", gid), slog.Any("error", err))
+		return true // fail closed: cannot rule out a conflicting claim
+	}
+	return keyConflicts(key, keys)
 }
 
 // memberAgrees requires one stored member to pass both gates against the
@@ -278,10 +301,13 @@ func (a *Assigner) memberAgrees(ctx context.Context, gid int64, text string, row
 // matchPending applies the same recall+gate bar against clusters forming
 // in this result set, so two keyless offers of one product group together
 // even when neither has been seen before.
-func matchPending(pending []*pendingCluster, text string, rows []string, vec []float32, thrStrong, thrWeak float32) *pendingCluster {
+func matchPending(pending []*pendingCluster, text string, rows []string, vec []float32, key string, thrStrong, thrWeak float32) *pendingCluster {
 	var best *pendingCluster
 	var bestSim float32
 	for _, p := range pending {
+		if keyConflicts(key, p.keys) {
+			continue
+		}
 		cv := p.centroid()
 		if cv == nil {
 			continue

@@ -92,6 +92,22 @@ func joinedCompatible(a, b map[string]struct{}) bool {
 	return len(shorter) >= 4 && strings.HasSuffix(longer, shorter)
 }
 
+// keyConflicts reports whether an incoming exact key contradicts keys a
+// group already claims: same keyspace, different value — "gtin:X" never
+// joins a group claiming "gtin:Y" (a product has one GTIN), while a
+// different keyspace ("mpn:M") is no conflict — one product legitimately
+// carries several identifier types.
+func keyConflicts(key string, keys []string) bool {
+	ns, _, _ := strings.Cut(key, ":")
+	for _, k := range keys {
+		kns, _, _ := strings.Cut(k, ":")
+		if kns == ns && k != key {
+			return true
+		}
+	}
+	return false
+}
+
 // discsCompatible is the discriminator gate: digit-token sets must be
 // subset-compatible, collapse to the same joined string (a store that
 // hyphenates "WH 1000 XM5" must not fragment against "WH-1000XM5"), or
