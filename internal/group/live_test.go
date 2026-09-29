@@ -70,6 +70,40 @@ func TestLivePGGroupStore(t *testing.T) {
 	}
 }
 
+// TestLivePGGroupWatchReads exercises the watch-side reads (issue #98):
+// member URLs list newest-first and the reverse URL→group lookup
+// resolves a member back to its group, unknown URLs to 0.
+func TestLivePGGroupWatchReads(t *testing.T) {
+	ctx := context.Background()
+	st := liveStore(t)
+	run := fmt.Sprintf("live-%d", time.Now().UnixNano()%1e9)
+
+	gid, err := st.CreateGroup(ctx, run+" earbuds", []float32{1, 0, 0, 0}, "livemodel",
+		Member{URL: "https://w1.test/" + run, Domain: "w1.test", Title: run + " earbuds", Match: "seed"}, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := st.AddMember(ctx, gid,
+		Member{URL: "https://w2.test/" + run, Domain: "w2.test", Title: run + " buds", Match: "embed:0.95"},
+		nil, nil); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	urls, err := st.MemberURLs(ctx, gid, 10)
+	if err != nil || len(urls) != 2 {
+		t.Fatalf("member urls: %v %d", err, len(urls))
+	}
+	if urls[0] != "https://w2.test/"+run {
+		t.Fatalf("freshest member must lead: %v", urls)
+	}
+	if got, err := st.GroupByURL(ctx, "https://w1.test/"+run); err != nil || got != gid {
+		t.Fatalf("group by url: %d %v", got, err)
+	}
+	if got, err := st.GroupByURL(ctx, "https://nobody.test/"+run); err != nil || got != 0 {
+		t.Fatalf("unknown url must resolve 0: %d %v", got, err)
+	}
+}
+
 // TestLivePGGroupModelSpace — a group must never surface through Nearest
 // under a different model name; vectors live per model space.
 func TestLivePGGroupModelSpace(t *testing.T) {

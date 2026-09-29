@@ -112,6 +112,63 @@ func watchDeps() deps {
 	return deps{watchStore: &fakeWatchStore{}}
 }
 
+// fakeGroupLookup satisfies watch.GroupLookup for kind=group tests.
+type fakeGroupLookup struct {
+	urls []string
+}
+
+func (f fakeGroupLookup) MemberURLs(_ context.Context, _ int64, limit int) ([]string, error) {
+	if len(f.urls) > limit {
+		return f.urls[:limit], nil
+	}
+	return f.urls, nil
+}
+
+func (f fakeGroupLookup) GroupByURL(context.Context, string) (int64, error) { return 0, nil }
+
+func TestWatchAddGroup(t *testing.T) {
+	d := deps{watchStore: &fakeWatchStore{},
+		groupLookup: fakeGroupLookup{urls: []string{"http://a.com/p"}}}
+	base := watchArgs{Action: "add", Kind: "group", GroupID: 42,
+		TargetPrice: 100, Currency: "USD"}
+	out := d.watchAdd(context.Background(), base)
+	if !out.OK {
+		t.Fatalf("valid group add rejected: %s", out.Error)
+	}
+	st := d.watchStore.(*fakeWatchStore)
+	if st.created.GroupID != 42 || st.created.Kind != watch.KindGroup {
+		t.Fatalf("stored watch = %+v", st.created)
+	}
+	if st.created.Interval != watch.MinGroupInterval {
+		t.Fatalf("default interval = %v, want group floor %v", st.created.Interval, watch.MinGroupInterval)
+	}
+
+	for _, tc := range []struct {
+		name string
+		mut  func(*watchArgs)
+		deps deps
+		want string
+	}{
+		{"no group_id", func(a *watchArgs) { a.GroupID = 0 }, d, "group_id"},
+		{"restock rejected", func(a *watchArgs) { a.NotifyOn = "restock" }, d, "kind=offer"},
+		{"variant rejected", func(a *watchArgs) { a.Variant = "64GB" }, d, "kind=offer"},
+		{"no registry", func(*watchArgs) {},
+			deps{watchStore: &fakeWatchStore{}}, "registry"},
+		{"empty group", func(*watchArgs) {},
+			deps{watchStore: &fakeWatchStore{}, groupLookup: fakeGroupLookup{}}, "not found"},
+		{"bad criteria", func(a *watchArgs) { a.Criteria = []string{"price_max:abc"} }, d, "criteria"},
+	} {
+		a := base
+		tc.mut(&a)
+		out := tc.deps.watchAdd(context.Background(), a)
+		if out.OK {
+			t.Errorf("%s: invalid group add accepted", tc.name)
+		} else if !strings.Contains(out.Error, tc.want) {
+			t.Errorf("%s: error %q lacks %q", tc.name, out.Error, tc.want)
+		}
+	}
+}
+
 func TestWatchAddValidation(t *testing.T) {
 	d := watchDeps()
 	base := watchArgs{Action: "add", Kind: "offer",

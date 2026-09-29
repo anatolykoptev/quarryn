@@ -34,13 +34,14 @@ type watchStorer interface {
 }
 type watchArgs struct {
 	Action   string   `json:"action" jsonschema:"add|list|get|cancel|check_now"`
-	Kind     string   `json:"kind,omitempty" jsonschema:"offer|query for add"`
+	Kind     string   `json:"kind,omitempty" jsonschema:"offer|query|group for add"`
 	WatchID  int64    `json:"watch_id,omitempty" jsonschema:"watch id for get/cancel/check_now"`
 	URL      string   `json:"url,omitempty" jsonschema:"offer: page to re-fetch"`
 	OfferID  string   `json:"offer_id,omitempty" jsonschema:"offer: stable id from a search result (optional)"`
 	Variant  string   `json:"variant,omitempty" jsonschema:"offer: pin one configuration — variant id or option substring like \"64GB\"; observer follows its price, not the listing min"`
 	Query    string   `json:"query,omitempty" jsonschema:"query: search text"`
-	Criteria []string `json:"criteria,omitempty" jsonschema:"query: product_search criteria"`
+	GroupID  int64    `json:"group_id,omitempty" jsonschema:"group: durable product group id from product_search — watch the product across stores, not one listing"`
+	Criteria []string `json:"criteria,omitempty" jsonschema:"query|group: product_search criteria — a live member offer only wins while it still passes"`
 	Label    string   `json:"label,omitempty" jsonschema:"human name for notifications"`
 	// target_price in major units (search-consistent); stored as minor.
 	// Required when notify_on=price|any unless target_pct is set.
@@ -76,6 +77,7 @@ type watchEntry struct {
 	OfferID          string         `json:"offer_id,omitempty"`
 	VariantSel       string         `json:"variant,omitempty"`
 	NativeID         bool           `json:"native_id,omitempty"`
+	GroupID          int64          `json:"group_id,omitempty"`
 	Query            string         `json:"query,omitempty"`
 	Criteria         []string       `json:"criteria,omitempty"`
 	Label            string         `json:"label,omitempty"`
@@ -97,6 +99,9 @@ type watchEntry struct {
 }
 
 // historyEntry is one recorded observation — newest first (issue #95).
+// GroupID joins the row to the durable product-group registry so the
+// history of one watch composes into the cross-store price history of
+// a product (issue #98).
 type historyEntry struct {
 	TS           string `json:"ts"`
 	PriceMinor   *int64 `json:"price_minor,omitempty"`
@@ -104,6 +109,7 @@ type historyEntry struct {
 	Availability string `json:"availability,omitempty"`
 	Outcome      string `json:"outcome"`
 	OfferURL     string `json:"offer_url,omitempty"`
+	GroupID      int64  `json:"group_id,omitempty"`
 }
 
 func toHistoryEntry(o watch.Observation) historyEntry {
@@ -114,6 +120,7 @@ func toHistoryEntry(o watch.Observation) historyEntry {
 		Availability: o.Availability,
 		Outcome:      o.Outcome,
 		OfferURL:     o.OfferURL,
+		GroupID:      o.GroupID,
 	}
 }
 
@@ -126,6 +133,7 @@ func toWatchEntry(w watch.Watch) watchEntry {
 		OfferID:          w.OfferID,
 		VariantSel:       w.VariantSel,
 		NativeID:         w.NativeID,
+		GroupID:          w.GroupID,
 		Query:            w.Query,
 		Criteria:         w.Criteria,
 		Label:            w.Label,
@@ -176,22 +184,25 @@ func (d deps) watchAdd(ctx context.Context, args watchArgs) watchOut {
 		return watchOut{Error: werr}
 	}
 	w.Owner = args.Owner
-	// Restock needs a stable listing: a query watch re-picks the cheapest
-	// offer each check, and cross-listing availability flips would report
-	// false restocks (Devin Review #101). DB enforces the same shape.
-	if args.Kind == string(watch.KindQuery) && w.NotifyOn != watch.NotifyPrice {
-		return watchOut{Error: "notify_on=" + w.NotifyOn + " requires kind=offer — a restock transition needs a stable listing, query watches take price triggers"}
+	// Restock needs a stable listing: query and group watches re-pick
+	// the cheapest offer each check, and cross-offer availability flips
+	// would report false restocks (Devin Review #101). DB enforces the
+	// same shape for query; group gets the same rule here.
+	if args.Kind != string(watch.KindOffer) && w.NotifyOn != watch.NotifyPrice {
+		return watchOut{Error: "notify_on=" + w.NotifyOn + " requires kind=offer — a restock transition needs a stable listing, query/group watches take price triggers"}
 	}
-	if args.Kind == string(watch.KindQuery) && strings.TrimSpace(args.Variant) != "" {
-		return watchOut{Error: "variant requires kind=offer — query watches re-pick the cheapest offer each check"}
+	if args.Kind != string(watch.KindOffer) && strings.TrimSpace(args.Variant) != "" {
+		return watchOut{Error: "variant requires kind=offer — query/group watches re-pick the cheapest offer each check"}
 	}
 	switch args.Kind {
 	case string(watch.KindOffer):
 		werr = watchAddOffer(ctx, args, &w)
 	case string(watch.KindQuery):
 		werr = watchAddQuery(args, &w)
+	case string(watch.KindGroup):
+		werr = d.watchAddGroup(ctx, args, &w)
 	default:
-		return watchOut{Error: `kind must be "offer" or "query"`}
+		return watchOut{Error: `kind must be "offer", "query" or "group"`}
 	}
 	if werr != "" {
 		return watchOut{Error: werr}
@@ -326,6 +337,34 @@ func watchAddQuery(args watchArgs, w *watch.Watch) string {
 	return watchInterval(args.IntervalMinutes, watch.MinQueryInterval, w)
 }
 
+// watchAddGroup fills the group-kind fields (issue #98): the durable
+// group id is the identity — validated against the registry at add
+// time so a typo'd id fails loudly instead of observing an empty
+// member set forever. Criteria are optional; a live member offer must
+// still pass them to win the check.
+func (d deps) watchAddGroup(ctx context.Context, args watchArgs, w *watch.Watch) string {
+	if args.GroupID <= 0 {
+		return "group_id required for kind=group"
+	}
+	if d.groupLookup == nil {
+		return "group watches unavailable — group registry not configured"
+	}
+	urls, err := d.groupLookup.MemberURLs(ctx, args.GroupID, 1)
+	if err != nil {
+		return "group lookup: " + err.Error()
+	}
+	if len(urls) == 0 {
+		return fmt.Sprintf("group %d not found or has no member offers yet", args.GroupID)
+	}
+	if _, err := match.PlanCriteria(args.Criteria); err != nil {
+		return "criteria: " + err.Error()
+	}
+	w.Kind = watch.KindGroup
+	w.GroupID = args.GroupID
+	w.Criteria = args.Criteria
+	return watchInterval(args.IntervalMinutes, watch.MinGroupInterval, w)
+}
+
 // watchInterval applies the caller's cadence or the kind's floor-default.
 func watchInterval(minutes int, floor time.Duration, w *watch.Watch) string {
 	if minutes <= 0 {
@@ -434,8 +473,10 @@ func (d deps) watchCheckNow(ctx context.Context, args watchArgs) watchOut {
 func registerProductWatch(srv *mcp.Server, d deps) {
 	mcpserver.AddTool(srv, &mcp.Tool{
 		Name: "product_watch",
-		Description: "Price/restock watches (issues #53, #93-96): kind=offer re-fetches one pinned " +
-			"URL; kind=query re-runs the search for the cheapest matching offer. " +
+		Description: "Price/restock watches (issues #53, #93-96, #98): kind=offer re-fetches one pinned " +
+			"URL; kind=query re-runs the search for the cheapest matching offer; " +
+			"kind=group re-reads a durable product group's member offers and watches the " +
+			"cheapest across stores — the product, not one listing. " +
 			"Triggers: target_price (absolute), target_pct (% drop vs first observed price), " +
 			"notify_on=restock (unbuyable→buyable transitions); optional free-form condition " +
 			"gated by the match service. Notifies via webhook — at-least-once ledger, " +
