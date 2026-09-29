@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.1](https://github.com/anatolykoptev/quarryn/compare/v1.26.0...v1.26.1) (2026-09-29)
+
+
+### Fixed
+
+* tolerate nil member evidence in group store insert ([#134](https://github.com/anatolykoptev/quarryn/issues/134)) ([54afdfe](https://github.com/anatolykoptev/quarryn/commit/54afdfeea9224f730d7f7366cddefdb378871869))
+
 ## [1.26.0](https://github.com/anatolykoptev/quarryn/compare/v1.25.1...v1.26.0) (2026-09-29)
 
 
