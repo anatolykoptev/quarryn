@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/anatolykoptev/quarryn/internal/extract"
@@ -264,6 +265,15 @@ func TestAssignEmbedSameProduct(t *testing.T) {
 	})
 	if out[0].GroupID == 0 || out[1].GroupID != out[0].GroupID {
 		t.Fatalf("same product across stores must share a group: %+v", out)
+	}
+	if out[1].Sim <= 0.9 {
+		t.Fatalf("pending join must report its cosine, got %v", out[1].Sim)
+	}
+	// Provenance: the pending-path joiner persists the same "embed:<cos>"
+	// label a stored-group join writes — no bare "embed" placeholders.
+	ms := st.groups[out[0].GroupID].members
+	if len(ms) != 2 || ms[0].Match != "seed" || !strings.HasPrefix(ms[1].Match, "embed:") {
+		t.Fatalf("member provenance: %+v", ms)
 	}
 }
 
