@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.0](https://github.com/anatolykoptev/quarryn/compare/v1.26.2...v1.27.0) (2026-09-29)
+
+
+### Added
+
+* group:true collapsed view + kind=group product watches ([#98](https://github.com/anatolykoptev/quarryn/issues/98)) ([#138](https://github.com/anatolykoptev/quarryn/issues/138)) ([61c181d](https://github.com/anatolykoptev/quarryn/commit/61c181d414660e05fba8b32646e407915cc9dcfb))
+
 ## [1.26.2](https://github.com/anatolykoptev/quarryn/compare/v1.26.1...v1.26.2) (2026-09-29)
 
 
