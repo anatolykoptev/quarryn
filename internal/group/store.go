@@ -363,7 +363,7 @@ func insertMember(ctx context.Context, tx pgx.Tx, gid int64, m Member) (bool, er
 	var inserted bool
 	err := tx.QueryRow(ctx, `
 		INSERT INTO product_group_members (group_id, url, domain, title, evidence, match)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4, COALESCE($5, '{}'::text[]), $6)
 		ON CONFLICT (group_id, url) DO NOTHING
 		RETURNING true`,
 		gid, m.URL, m.Domain, m.Title, m.Evidence, m.Match).Scan(&inserted)
