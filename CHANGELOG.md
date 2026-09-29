@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.2](https://github.com/anatolykoptev/quarryn/compare/v1.26.1...v1.26.2) (2026-09-29)
+
+
+### Fixed
+
+* **group:** persist cosine provenance for pending-cluster joins ([#136](https://github.com/anatolykoptev/quarryn/issues/136)) ([af8d851](https://github.com/anatolykoptev/quarryn/commit/af8d85107577197653a06c34a50cd0ea8131921a))
+
 ## [1.26.1](https://github.com/anatolykoptev/quarryn/compare/v1.26.0...v1.26.1) (2026-09-29)
 
 
