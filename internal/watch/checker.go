@@ -76,7 +76,9 @@ func (c *Checker) sweep(ctx context.Context) {
 	}
 	for _, w := range due {
 		budget := c.OfferBudget
-		if w.Kind == KindQuery {
+		if w.Kind == KindQuery || w.Kind == KindGroup {
+			// A group check is a bounded batch of member fetches — the
+			// heavier budget, same tier as a query re-search.
 			budget = c.QueryBudget
 		}
 		func() {

@@ -17,6 +17,10 @@ type productSearchInput struct {
 	Query      string   `json:"query"                jsonschema:"Product search query (e.g. \"sony wh-1000xm5\")"`
 	Criteria   []string `json:"criteria,omitempty"   jsonschema:"Match criteria: deterministic key:value constraints (price_max:500, brand:sony, not_keyword:refurbished, availability:in_stock, currency:usd) and/or free-text subjective requirements (\"good battery life\") judged per product"`
 	MaxResults int      `json:"max_results,omitempty" jsonschema:"Cap on returned products (default 10, max 50)"`
+	// Group requests the collapsed view (issue #98): results merge into
+	// one products[] row per product identity — same-product offers
+	// across stores share one entry carrying stores[] + best_offer.
+	Group bool `json:"group,omitempty" jsonschema:"Collapse to one row per product: same-product offers across stores merge into products[] with stores[] and best_offer (replaces results[])"`
 }
 
 // productMatchInput is the product_match tool argument shape: one
@@ -90,6 +94,21 @@ type productGroup struct {
 	Offers    []groupOffer `json:"offers"`
 }
 
+// collapsedProduct is the group:true row (issue #98): one entry per
+// product identity, whatever evidence established it — the persistent
+// group id, an ephemeral exact key, or a singleton when neither applies.
+// The embedded result is the row's representative: the member whose
+// offer is best_offer when a same-currency compare found one, else the
+// highest-ranked member. stores[] lists every distinct source domain
+// that carried the product; offers[] is the same minimal comparison
+// view groups[] offers use.
+type collapsedProduct struct {
+	productResult
+	Stores    []string     `json:"stores"`
+	Offers    []groupOffer `json:"offers"`
+	BestOffer *groupOffer  `json:"best_offer,omitempty"`
+}
+
 // searchOutput is the product_search response. RequestID is the ADR-6
 // calibration id — the uuid on every jeff_gate log event of this call and
 // the key callers pass to product_feedback so the outcome joins offline.
@@ -105,6 +124,10 @@ type searchOutput struct {
 	// claims, or embedding-tier matches when the registry is configured.
 	// Never title-string similarity.
 	Groups []productGroup `json:"groups,omitempty"`
+	// Products is the group:true collapsed view — one row per product
+	// identity, merging same-product offers across stores. Present only
+	// when the caller passed group:true; it replaces Results.
+	Products []collapsedProduct `json:"products,omitempty"`
 }
 
 // matchOutput is the product_match response — a single judged product.

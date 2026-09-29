@@ -116,13 +116,17 @@ func (n *AlertmanagerNotifier) Notify(ctx context.Context, w Watch, obs Observat
 	return 0, nil
 }
 
-// watchLabel is the human-facing name — label, else query, else URL.
+// watchLabel is the human-facing name — label, else query, else the
+// group id for product watches, else URL.
 func watchLabel(w Watch) string {
 	if w.Label != "" {
 		return w.Label
 	}
 	if w.Query != "" {
 		return w.Query
+	}
+	if w.Kind == KindGroup {
+		return "group:" + strconv.FormatInt(w.GroupID, 10)
 	}
 	return w.URL
 }
@@ -163,6 +167,7 @@ type webhookPayload struct {
 	ChatID           string `json:"chat_id,omitempty"` // owner sans tg: — hermes webhook deliver_extra template
 	Label            string `json:"label,omitempty"`
 	URL              string `json:"url,omitempty"`
+	GroupID          int64  `json:"group_id,omitempty"`
 	Query            string `json:"query,omitempty"`
 	OfferID          string `json:"offer_id,omitempty"`
 	PriceMinor       *int64 `json:"price_minor,omitempty"`
@@ -192,7 +197,8 @@ func (n *WebhookNotifier) Notify(ctx context.Context, w Watch, obs Observation, 
 		Owner:            w.Owner,
 		ChatID:           chatID,
 		Label:            label,
-		URL:              w.URL,
+		URL:              alertURL(w, obs),
+		GroupID:          obs.GroupID,
 		Query:            w.Query,
 		OfferID:          obs.OfferID,
 		PriceMinor:       obs.PriceMinor,
@@ -231,6 +237,16 @@ func (n *WebhookNotifier) Notify(ctx context.Context, w Watch, obs Observation, 
 		return retryAfter(resp), fmt.Errorf("webhook notify: HTTP %d", resp.StatusCode)
 	}
 	return 0, nil
+}
+
+// alertURL picks the link a recipient opens: the winning live offer
+// when the observation carried one (the only URL group watches have),
+// else the watch's pinned page.
+func alertURL(w Watch, obs Observation) string {
+	if obs.OfferURL != "" {
+		return obs.OfferURL
+	}
+	return w.URL
 }
 
 // OwnerPrefixTelegram marks bot-owned watches ("tg:<chat_id>") — the

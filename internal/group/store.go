@@ -190,6 +190,42 @@ func parseVector(s string) []float32 {
 	return v
 }
 
+// MemberURLs lists a group's member offer URLs, freshest first —
+// group-kind watches re-read the head of the list each check.
+func (s *Store) MemberURLs(ctx context.Context, gid int64, limit int) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT url FROM product_group_members
+		  WHERE group_id = $1
+		  ORDER BY last_seen DESC LIMIT $2`, gid, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// GroupByURL resolves a canonical offer URL to its group id — the
+// reverse member lookup price-history joins use (issue #98), 0 when the
+// URL never proved membership.
+func (s *Store) GroupByURL(ctx context.Context, url string) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT group_id FROM product_group_members WHERE url = $1
+		  ORDER BY last_seen DESC LIMIT 1`, url).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
+}
+
 // MemberTexts returns up to limit member records of a group — the gate
 // checks a new offer against real member evidence, not only the label.
 func (s *Store) MemberTexts(ctx context.Context, gid int64, limit int) ([]Member, error) {

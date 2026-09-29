@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"strconv"
 
 	mcpserver "github.com/anatolykoptev/go-mcpserver"
 	"github.com/anatolykoptev/quarryn/internal/extract"
@@ -70,6 +71,13 @@ func handleProductSearch(ctx context.Context, d deps, in productSearchInput) (*m
 		resp.Groups = buildAssignedGroups(resp.Results)
 	} else {
 		resp.Groups = buildGroups(resp.Results)
+	}
+	if in.Group {
+		resp.Products = collapseResults(resp.Results)
+		// An empty non-nil slice keeps "results":[] out of the response —
+		// the collapsed rows live in products[], and a null field would
+		// read as a shape violation to clients.
+		resp.Results = []productResult{}
 	}
 	return jsonResult(resp)
 }
@@ -223,6 +231,73 @@ func buildGroups(results []productResult) []productGroup {
 		groups = append(groups, g)
 	}
 	return groups
+}
+
+// collapseResults merges results into the group:true view — one row per
+// product identity. Clustering prefers the durable group id; results the
+// registry left unassigned fall back to the ephemeral exact key, and a
+// result carrying neither forms a singleton row. The row's embedded
+// productResult is the member behind best_offer when one exists (its
+// price fields are what a buyer would act on), else the highest-ranked
+// member. Row order follows first member appearance — the same rank
+// ordering results[] would have had.
+func collapseResults(results []productResult) []collapsedProduct {
+	byCluster := make(map[string][]int, len(results))
+	order := make([]string, 0, len(results))
+	for i, r := range results {
+		var k string
+		switch {
+		case r.GroupID > 0:
+			k = "id:" + strconv.FormatInt(r.GroupID, 10)
+		case r.GroupKey != "":
+			k = "key:" + r.GroupKey
+		default:
+			k = "one:" + strconv.Itoa(i) // singleton — unidentifiable result
+		}
+		if _, seen := byCluster[k]; !seen {
+			order = append(order, k)
+		}
+		byCluster[k] = append(byCluster[k], i)
+	}
+	out := make([]collapsedProduct, 0, len(order))
+	for _, k := range order {
+		members := byCluster[k]
+		rep := members[0]
+		offers := make([]groupOffer, 0, len(members))
+		var stores []string
+		seenStore := make(map[string]bool, len(members))
+		for _, mi := range members {
+			m := results[mi]
+			offers = append(offers, groupOffer{
+				URL:          m.URL,
+				Source:       m.Source,
+				PriceMinor:   m.PriceMinor,
+				Currency:     m.Currency,
+				Availability: m.Availability,
+				Passed:       m.Passed,
+			})
+			if !seenStore[m.Source] {
+				seenStore[m.Source] = true
+				stores = append(stores, m.Source)
+			}
+		}
+		best := bestOffer(offers)
+		if best != nil {
+			for _, mi := range members {
+				if results[mi].URL == best.URL {
+					rep = mi // the best offer's product is the row's face
+					break
+				}
+			}
+		}
+		out = append(out, collapsedProduct{
+			productResult: results[rep],
+			Stores:        stores,
+			Offers:        offers,
+			BestOffer:     best,
+		})
+	}
+	return out
 }
 
 // bestOffer picks the cheapest still-passing offer, requiring one shared

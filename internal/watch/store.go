@@ -81,14 +81,24 @@ func (s *Store) insert(ctx context.Context, q queryRower, w *Watch, crit []byte)
 		INSERT INTO watches (kind, offer_id, native_id, url, label, query,
 			criteria, target_price_minor, currency, interval_minutes,
 			expires_at, next_check_after, notify_on, target_pct,
-			condition_text, owner, variant_sel)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(),$12,$13,$14,$15,$16)
+			condition_text, owner, variant_sel, group_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(),$12,$13,$14,$15,$16,$17)
 		RETURNING id, created_at`,
 		w.Kind, w.OfferID, w.NativeID, w.URL, w.Label, w.Query,
 		crit, w.TargetPriceMinor, w.Currency,
 		int(w.Interval.Minutes()), w.ExpiresAt,
-		w.NotifyOn, w.TargetPct, w.ConditionText, w.Owner, w.VariantSel).
+		w.NotifyOn, w.TargetPct, w.ConditionText, w.Owner, w.VariantSel,
+		nilZero(w.GroupID)).
 		Scan(&w.ID, &w.CreatedAt)
+}
+
+// nilZero renders a 0 id as NULL — group_id stays NULL for the kinds
+// that never carry one.
+func nilZero(v int64) any {
+	if v == 0 {
+		return nil
+	}
+	return v
 }
 
 // List returns watches; inactive ones only when includeInactive.
@@ -102,7 +112,7 @@ func (s *Store) List(ctx context.Context, owner string, includeInactive bool) ([
 		notify_pending, last_notify_attempt_at, notified_price_minor,
 		notified_at, notify_count, notify_on, target_pct,
 		baseline_price_minor, condition_text, pending_trigger, owner,
-		variant_sel
+		variant_sel, group_id
 		FROM watches`
 	var args []any
 	var conds []string
@@ -145,7 +155,7 @@ func (s *Store) Get(ctx context.Context, owner string, id int64) (Watch, error) 
 			notify_pending, last_notify_attempt_at, notified_price_minor,
 			notified_at, notify_count, notify_on, target_pct,
 			baseline_price_minor, condition_text, pending_trigger, owner,
-			variant_sel
+			variant_sel, group_id
 		FROM watches WHERE id=$1 AND ($2='' OR owner=$2)`, id, owner)
 	return scanWatch(row)
 }
@@ -169,7 +179,7 @@ func (s *Store) Due(ctx context.Context, limit int, now time.Time) ([]Watch, err
 			notify_pending, last_notify_attempt_at, notified_price_minor,
 			notified_at, notify_count, notify_on, target_pct,
 			baseline_price_minor, condition_text, pending_trigger, owner,
-			variant_sel
+			variant_sel, group_id
 		FROM watches
 		WHERE status='active' AND expires_at > $1 AND next_check_after <= $1
 		ORDER BY next_check_after
@@ -205,6 +215,7 @@ func scanWatch(r rowScanner) (Watch, error) {
 	var w Watch
 	var crit []byte
 	var intervalMin int
+	var gid *int64 // nullable column — group watches only
 	err := r.Scan(&w.ID, &w.CreatedAt, &w.ExpiresAt, &w.Kind, &w.OfferID,
 		&w.NativeID, &w.URL, &w.Label, &w.Query, &crit,
 		&w.TargetPriceMinor, &w.Currency, &intervalMin, &w.Status,
@@ -212,9 +223,13 @@ func scanWatch(r rowScanner) (Watch, error) {
 		&w.LastAvailability, &w.ConsecFailures, &w.NotifyPending,
 		&w.LastNotifyAttemptAt, &w.NotifiedPriceMinor, &w.NotifiedAt,
 		&w.NotifyCount, &w.NotifyOn, &w.TargetPct, &w.BaselineMinor,
-		&w.ConditionText, &w.PendingTrigger, &w.Owner, &w.VariantSel)
+		&w.ConditionText, &w.PendingTrigger, &w.Owner, &w.VariantSel,
+		&gid)
 	if err != nil {
 		return w, err
+	}
+	if gid != nil {
+		w.GroupID = *gid
 	}
 	w.Interval = time.Duration(intervalMin) * time.Minute
 	if len(crit) > 0 {
@@ -238,10 +253,11 @@ func (s *Store) Record(ctx context.Context, w *Watch, obs Observation) error {
 	_, err = tx.Exec(ctx, `
 		INSERT INTO watch_observations
 			(watch_id, price_minor, currency, availability, offer_url,
-			 offer_id, outcome, detail)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			 offer_id, outcome, detail, group_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 		w.ID, obs.PriceMinor, obs.Currency, obs.Availability,
-		obs.OfferURL, obs.OfferID, obs.Outcome, obs.Detail)
+		obs.OfferURL, obs.OfferID, obs.Outcome, obs.Detail,
+		nilZero(obs.GroupID))
 	if err != nil {
 		return fmt.Errorf("insert observation: %w", err)
 	}
@@ -275,7 +291,7 @@ func (s *Store) History(ctx context.Context, id int64, limit int) ([]Observation
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT ts, price_minor, currency, availability, offer_url,
-			offer_id, outcome, detail
+			offer_id, outcome, detail, group_id
 		FROM watch_observations
 		WHERE watch_id = $1
 		ORDER BY ts DESC
@@ -287,10 +303,14 @@ func (s *Store) History(ctx context.Context, id int64, limit int) ([]Observation
 	var out []Observation
 	for rows.Next() {
 		var o Observation
+		var gid *int64
 		if err := rows.Scan(&o.TS, &o.PriceMinor, &o.Currency,
 			&o.Availability, &o.OfferURL, &o.OfferID, &o.Outcome,
-			&o.Detail); err != nil {
+			&o.Detail, &gid); err != nil {
 			return nil, err
+		}
+		if gid != nil {
+			o.GroupID = *gid
 		}
 		o.WatchID = id
 		out = append(out, o)

@@ -85,16 +85,22 @@ func runMCPServer(cfg config.Config) error {
 		if err != nil {
 			slog.Error("search pipeline init failed", slog.Any("error", err))
 		}
-		watchStore, checker := newWatcher(searcher, pgdb, cfg, err)
-		grouper := newGrouper(cfg)
-		api.RegisterTools(srv, searcher, cfg, feedback, probeRunner(searcher, cfg), watchStore, checker, orderStore, grouper, err)
+		grouper, groupStore := newGrouper(cfg)
+		// A typed nil *group.Store inside the interface still reads
+		// non-nil — convert, or group lookups would dereference it.
+		var groupLookup watch.GroupLookup
+		if groupStore != nil {
+			groupLookup = groupStore
+		}
+		watchStore, checker := newWatcher(searcher, pgdb, cfg, groupLookup, err)
+		api.RegisterTools(srv, searcher, cfg, feedback, probeRunner(searcher, cfg), watchStore, checker, orderStore, grouper, groupLookup, err)
 	})
 }
 
 // newWatcher assembles the price-watch pair (issue #53): needs both pg
 // (state) and the searcher (observations) — with either missing the tool
 // still registers and reports unavailable rather than silently vanishing.
-func newWatcher(s *search.Searcher, pgdb *postgres.DB, cfg config.Config, initErr error) (*watch.Store, *watch.Checker) {
+func newWatcher(s *search.Searcher, pgdb *postgres.DB, cfg config.Config, groups watch.GroupLookup, initErr error) (*watch.Store, *watch.Checker) {
 	if pgdb == nil || initErr != nil {
 		if cfg.DatabaseURL != "" {
 			slog.Warn("watch disabled — postgres or search pipeline unavailable")
@@ -127,7 +133,7 @@ func newWatcher(s *search.Searcher, pgdb *postgres.DB, cfg config.Config, initEr
 	st := watch.NewStore(pgdb.Pool())
 	ch := &watch.Checker{
 		Store:       st,
-		Observer:    watch.NewSearcherObserver(s),
+		Observer:    watch.NewSearcherObserver(s, groups),
 		Notify:      notifier,
 		Evaluator:   s, // nil-jeff degrade: condition watches fail closed
 		Tick:        cfg.WatchTick,
@@ -164,19 +170,22 @@ func openStores(cfg config.Config) (*postgres.DB, *api.FeedbackStore, *orders.St
 }
 
 // newGrouper builds the durable product-identity assigner (issue #98
-// embedding tier). It needs the groups registry (pgvector host); the
-// embedder is optional inside it — without EMBED_URL exact identifiers
-// still persist, keyless products just never join. Either failure logs
-// and returns nil: grouping degrades to ephemeral exact-only and the
-// service stays up — an auxiliary path never decides availability.
-func newGrouper(cfg config.Config) *group.Assigner {
+// embedding tier) and returns the registry beside it — group-kind
+// watches and observation group-resolution read the same store through
+// the watch.GroupLookup seam. It needs the groups registry (pgvector
+// host); the embedder is optional inside it — without EMBED_URL exact
+// identifiers still persist, keyless products just never join. Either
+// failure logs and returns nil: grouping degrades to ephemeral
+// exact-only and the service stays up — an auxiliary path never
+// decides availability.
+func newGrouper(cfg config.Config) (*group.Assigner, *group.Store) {
 	if cfg.GroupsDatabaseURL == "" {
-		return nil
+		return nil, nil
 	}
 	store, err := group.NewStore(context.Background(), cfg.GroupsDatabaseURL, cfg.EmbedDim)
 	if err != nil {
 		slog.Error("group store unavailable — grouping stays ephemeral", slog.Any("error", err))
-		return nil
+		return nil, nil
 	}
 	var emb embed.Embedder
 	if cfg.EmbedURL != "" {
@@ -202,7 +211,7 @@ func newGrouper(cfg config.Config) *group.Assigner {
 	slog.Info("group assigner up",
 		slog.String("model", cfg.EmbedModel), slog.Bool("embedder", emb != nil))
 	return group.NewAssigner(store, emb, cfg.EmbedModel,
-		float32(cfg.GroupEmbedThreshold), float32(cfg.GroupEmbedWeak), cfg.GroupTopK)
+		float32(cfg.GroupEmbedThreshold), float32(cfg.GroupEmbedWeak), cfg.GroupTopK), store
 }
 
 // probeRunner picks the acceptance-probe backend: the pipeline's own

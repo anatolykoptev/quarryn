@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -41,7 +42,7 @@ func boolRef(v bool) *bool { return &v }
 func TestObserveVariantPinnedBySubstring(t *testing.T) {
 	w := Watch{URL: "https://shop.example.com/products/mbp",
 		VariantSel: "64GB", Currency: "USD", OfferID: "url|x"}
-	obs := observeVariant(w, variantProduct())
+	obs := (&SearcherObserver{}).observeVariant(t.Context(), w, variantProduct())
 	if obs.Outcome != OutcomeOK {
 		t.Fatalf("outcome = %q (%s)", obs.Outcome, obs.Detail)
 	}
@@ -59,7 +60,7 @@ func TestObserveVariantPinnedBySubstring(t *testing.T) {
 func TestObserveVariantPinnedByID(t *testing.T) {
 	w := Watch{URL: "https://shop.example.com/products/mbp",
 		VariantSel: "5001", Currency: "USD"}
-	obs := observeVariant(w, variantProduct())
+	obs := (&SearcherObserver{}).observeVariant(t.Context(), w, variantProduct())
 	if obs.Outcome != OutcomeOK || obs.PriceMinor == nil || *obs.PriceMinor != 238900 {
 		t.Fatalf("id-pin failed: %+v", obs)
 	}
@@ -73,7 +74,7 @@ func TestObserveVariantPinnedByID(t *testing.T) {
 func TestObserveVariantMissFailsClosed(t *testing.T) {
 	w := Watch{URL: "https://shop.example.com/products/mbp",
 		VariantSel: "128GB", Currency: "USD"}
-	obs := observeVariant(w, variantProduct())
+	obs := (&SearcherObserver{}).observeVariant(t.Context(), w, variantProduct())
 	if obs.Outcome != OutcomeNoOffers {
 		t.Fatalf("outcome = %q, want no_offers", obs.Outcome)
 	}
@@ -86,7 +87,7 @@ func TestObserveVariantMissFailsClosed(t *testing.T) {
 // the empty matrix has no member to follow.
 func TestObserveVariantEmptyMatrix(t *testing.T) {
 	w := Watch{URL: "https://s.example/p", VariantSel: "64GB"}
-	obs := observeVariant(w, &extract.Product{Name: "n", Currency: "USD"})
+	obs := (&SearcherObserver{}).observeVariant(t.Context(), w, &extract.Product{Name: "n", Currency: "USD"})
 	if obs.Outcome != OutcomeNoOffers {
 		t.Fatalf("outcome = %q", obs.Outcome)
 	}
@@ -99,7 +100,7 @@ func TestObserveVariantUnknownStockStaysEmpty(t *testing.T) {
 	p.Variants[0].Available = nil
 	w := Watch{URL: "https://shop.example.com/products/mbp",
 		VariantSel: "5001", Currency: "USD"}
-	obs := observeVariant(w, p)
+	obs := (&SearcherObserver{}).observeVariant(t.Context(), w, p)
 	if obs.Availability != "" {
 		t.Fatalf("availability = %q, want empty (listing state must not leak)", obs.Availability)
 	}
@@ -111,7 +112,7 @@ func TestObserveVariantOfferURLQuerySafe(t *testing.T) {
 	p.Variants[0].URL = "" // force the fallback branch
 	w := Watch{URL: "https://shop.example.com/products/mbp?utm=x",
 		VariantSel: "5001", Currency: "USD"}
-	obs := observeVariant(w, p)
+	obs := (&SearcherObserver{}).observeVariant(t.Context(), w, p)
 	if obs.OfferURL != "https://shop.example.com/products/mbp?variant=5001" {
 		t.Fatalf("offer_url = %q", obs.OfferURL)
 	}
@@ -124,7 +125,7 @@ func TestObserveVariantScopesConditionProduct(t *testing.T) {
 	p := variantProduct()
 	w := Watch{URL: "https://shop.example.com/products/mbp",
 		VariantSel: "64GB", Currency: "USD"}
-	obs := observeVariant(w, p)
+	obs := (&SearcherObserver{}).observeVariant(t.Context(), w, p)
 	if obs.Product == nil || obs.Product == p {
 		t.Fatal("condition product must be a scoped copy")
 	}
@@ -179,7 +180,7 @@ func TestObserveQueryConfirmsWinnerLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search.New: %v", err)
 	}
-	obs := NewSearcherObserver(s).Observe(t.Context(), Watch{
+	obs := NewSearcherObserver(s, nil).Observe(t.Context(), Watch{
 		Kind: KindQuery, Query: "deal", Currency: "USD",
 	})
 	if obs.Outcome != OutcomeOK {
@@ -240,7 +241,7 @@ func TestObserveQueryConfirmsReordered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search.New: %v", err)
 	}
-	obs := NewSearcherObserver(s).Observe(t.Context(), Watch{
+	obs := NewSearcherObserver(s, nil).Observe(t.Context(), Watch{
 		Kind: KindQuery, Query: "deal", Currency: "USD",
 	})
 	if obs.Outcome != OutcomeOK {
@@ -251,6 +252,155 @@ func TestObserveQueryConfirmsReordered(t *testing.T) {
 	}
 	if !strings.Contains(obs.OfferURL, "deal-b") {
 		t.Fatalf("offer_url = %q — must track the live-cheapest offer", obs.OfferURL)
+	}
+}
+
+// fakeGroupLookup satisfies GroupLookup for observe-group tests.
+type fakeGroupLookup struct {
+	urls  []string
+	byURL map[string]int64
+	err   error
+}
+
+func (f fakeGroupLookup) MemberURLs(_ context.Context, _ int64, limit int) ([]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(f.urls) > limit {
+		return f.urls[:limit], nil
+	}
+	return f.urls, nil
+}
+
+func (f fakeGroupLookup) GroupByURL(_ context.Context, url string) (int64, error) {
+	return f.byURL[url], nil
+}
+
+// A group watch must see the cheapest LIVE member offer — members are
+// identity-verified by the registry, so the observation is a bounded
+// batch of live re-reads, not a search. deal-a is 399.99 live, deal-b
+// 219.99 — the observation must pick deal-b and carry the pinned id.
+func TestObserveGroupCheapestMember(t *testing.T) {
+	for _, k := range []string{
+		"EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET",
+		"ETSY_API_KEY", "ETSY_SHARED_SECRET",
+		"SHOPIFY_SHOPS", "INTERNAL_SERVICE_SECRET", "REDIS_URL",
+	} {
+		t.Setenv(k, "")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var req wowa.FetchRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		price := "249.99"
+		key := "deal-9"
+		switch {
+		case strings.Contains(req.URL, "deal-a"):
+			price, key = "399.99", "deal-a"
+		case strings.Contains(req.URL, "deal-b"):
+			price, key = "219.99", "deal-b"
+		}
+		body := strings.ReplaceAll(dealPageHTML, "deal-9", key)
+		body = strings.ReplaceAll(body, "249.99", price)
+		_ = json.NewEncoder(w).Encode(wowa.FetchResponse{Status: 200, Body: body})
+	}))
+	t.Cleanup(srv.Close)
+
+	s, err := search.New(config.Config{WowaURL: srv.URL},
+		sources.WithManifestGate(func(sources.Manifest, string) bool { return true }))
+	if err != nil {
+		t.Fatalf("search.New: %v", err)
+	}
+	groups := fakeGroupLookup{urls: []string{
+		"http://203.0.113.50/deal-a",
+		"http://203.0.113.50/deal-b",
+	}}
+	obs := NewSearcherObserver(s, groups).Observe(t.Context(), Watch{
+		Kind: KindGroup, GroupID: 42, Currency: "USD",
+	})
+	if obs.Outcome != OutcomeOK {
+		t.Fatalf("outcome = %q (%s)", obs.Outcome, obs.Detail)
+	}
+	if obs.PriceMinor == nil || *obs.PriceMinor != 21999 {
+		t.Fatalf("price = %v — must be deal-b's live 219.99", obs.PriceMinor)
+	}
+	if obs.GroupID != 42 {
+		t.Fatalf("group_id = %d, want the pinned 42", obs.GroupID)
+	}
+	if !strings.Contains(obs.OfferURL, "deal-b") {
+		t.Fatalf("offer_url = %q — must be the cheapest member", obs.OfferURL)
+	}
+}
+
+// No registry → a group watch degrades to fetch_failed, never panics —
+// and the pinned id still lands on the observation so the history join
+// does not break on a failure row.
+func TestObserveGroupNoRegistry(t *testing.T) {
+	obs := NewSearcherObserver(nil, nil).Observe(t.Context(), Watch{
+		Kind: KindGroup, GroupID: 7, Currency: "USD",
+	})
+	if obs.Outcome != OutcomeFetchFailed {
+		t.Fatalf("outcome = %q, want fetch_failed", obs.Outcome)
+	}
+	if obs.GroupID != 7 {
+		t.Fatalf("failed observation must keep the pinned group_id, got %d", obs.GroupID)
+	}
+}
+
+// The member lookup must try the listing URL, not only the resolved
+// merchant link — registry members are keyed by listing URL, so a
+// buy_url hop would otherwise drop the history join.
+func TestGroupLookupURLs(t *testing.T) {
+	w := Watch{URL: "https://store.com/listing"}
+	obs := Observation{
+		OfferURL: "https://merchant.com/buy",
+		Product:  &extract.Product{URL: "https://store.com/listing"},
+	}
+	urls := groupLookupURLs(w, obs)
+	if len(urls) != 2 || urls[0] != "https://merchant.com/buy" || urls[1] != "https://store.com/listing" {
+		t.Fatalf("lookup urls = %v — want offer, then deduped listing", urls)
+	}
+	// Offer/watch URL identical → single candidate.
+	obs.OfferURL = w.URL
+	if urls := groupLookupURLs(w, obs); len(urls) != 1 {
+		t.Fatalf("dedup failed: %v", urls)
+	}
+}
+
+// Offer-watch history join: the winning URL resolving to a known member
+// stamps the observation's group_id — the cross-store price history
+// link issue #98 wants.
+func TestObserveOfferAttachGroup(t *testing.T) {
+	for _, k := range []string{
+		"EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET",
+		"ETSY_API_KEY", "ETSY_SHARED_SECRET",
+		"SHOPIFY_SHOPS", "INTERNAL_SERVICE_SECRET", "REDIS_URL",
+	} {
+		t.Setenv(k, "")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(wowa.FetchResponse{Status: 200, Body: dealPageHTML})
+	}))
+	t.Cleanup(srv.Close)
+
+	s, err := search.New(config.Config{WowaURL: srv.URL},
+		sources.WithManifestGate(func(sources.Manifest, string) bool { return true }))
+	if err != nil {
+		t.Fatalf("search.New: %v", err)
+	}
+	pageURL := "http://203.0.113.50/deal-9"
+	groups := fakeGroupLookup{byURL: map[string]int64{
+		extract.CanonicalURL(pageURL): 9,
+	}}
+	obs := NewSearcherObserver(s, groups).Observe(t.Context(), Watch{
+		Kind: KindOffer, URL: pageURL, Currency: "USD",
+	})
+	if obs.Outcome != OutcomeOK {
+		t.Fatalf("outcome = %q (%s)", obs.Outcome, obs.Detail)
+	}
+	if obs.GroupID != 9 {
+		t.Fatalf("group_id = %d — member lookup must join the observation", obs.GroupID)
 	}
 }
 

@@ -24,6 +24,10 @@ const (
 	// KindQuery re-runs the search and watches the cheapest passed offer
 	// in the watch's currency.
 	KindQuery Kind = "query"
+	// KindGroup re-reads the live member offers of a durable product
+	// group (issue #98) and watches the cheapest across stores — "watch
+	// the product, not one listing".
+	KindGroup Kind = "group"
 )
 
 // Watch status lifecycle.
@@ -61,6 +65,10 @@ const (
 const (
 	MinOfferInterval = 60 * time.Minute
 	MinQueryInterval = 6 * time.Hour
+	// MinGroupInterval sits between the two: a group check is a bounded
+	// batch of member page fetches — heavier than one offer fetch,
+	// lighter than a full search pipeline run.
+	MinGroupInterval = 2 * time.Hour
 	// unverifiableAfter: consecutive extract_empty observations before the
 	// watch stops consuming check budget — the spec's "report unverifiable
 	// instead of silently watching a stale listing".
@@ -81,9 +89,13 @@ type Watch struct {
 	// "64GB". Offer-kind only; empty = the listing's default
 	// (min-price in-stock) observation.
 	VariantSel string
-	Label      string
-	Query      string
-	Criteria   []string
+	// GroupID pins the watch to a durable product group (issue #98):
+	// kind=group only, resolved by the observer through the group
+	// registry's member offers.
+	GroupID  int64
+	Label    string
+	Query    string
+	Criteria []string
 	// Triggers — at least one applies (SQL CHECK): absolute price target,
 	// percent-drop from baseline, or a notify_on mode that includes
 	// restock. TargetPriceMinor is nil for pct-only and pure restock
@@ -129,9 +141,14 @@ type Observation struct {
 	Availability string
 	OfferURL     string
 	OfferID      string
-	Outcome      string
-	Detail       string
-	Product      *extract.Product `json:"-"`
+	// GroupID joins the observation to the durable product-group
+	// registry: the pinned id for group watches, the member's group for
+	// offer/query observations whose winning URL is a known member.
+	// 0 = no group relationship resolved.
+	GroupID int64
+	Outcome string
+	Detail  string
+	Product *extract.Product `json:"-"`
 }
 
 // Due reports whether the watch wants a check now.

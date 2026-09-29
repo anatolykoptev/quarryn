@@ -232,3 +232,28 @@ func TestWebhookNotifierNoSecret(t *testing.T) {
 		t.Fatal("unsigned notifier must not send signature headers")
 	}
 }
+
+// Group-watch alerts must carry the winning offer link, not the empty
+// watch URL — the payload URL is what a recipient opens to buy.
+func TestWebhookNotifierGroupAlertURL(t *testing.T) {
+	var parsed map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&parsed)
+	}))
+	t.Cleanup(srv.Close)
+	n := NewWebhookNotifier(srv.URL, "")
+	price := int64(21999)
+	_, _ = n.Notify(context.Background(),
+		Watch{ID: 3, Kind: KindGroup, GroupID: 42, Currency: "USD"},
+		Observation{Outcome: OutcomeOK, GroupID: 42, PriceMinor: &price,
+			Currency: "USD", OfferURL: "https://b.store/deal-b"}, "price")
+	if parsed["url"] != "https://b.store/deal-b" {
+		t.Fatalf("url = %v — group alert must carry the winning member offer", parsed["url"])
+	}
+	if parsed["group_id"] != float64(42) {
+		t.Fatalf("group_id = %v", parsed["group_id"])
+	}
+	if parsed["label"] != "group:42" {
+		t.Fatalf("label = %v — unlabelled group watch falls back to its id", parsed["label"])
+	}
+}

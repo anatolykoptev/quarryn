@@ -48,7 +48,11 @@ type deps struct {
 	// embedding tier); nil when GROUPS_DATABASE_URL is unset — grouping
 	// then stays ephemeral exact-only via buildGroups.
 	grouper *group.Assigner
-	initErr error
+	// groupLookup is the watch layer's read seam onto the same registry:
+	// kind=group validation at add time and offer/query observation
+	// group resolution. Nil degrades the same way grouper does.
+	groupLookup watch.GroupLookup
+	initErr     error
 	// watchOwnerMax caps active watches per tenant owner (public-bot
 	// abuse bound); 0 = unlimited.
 	watchOwnerMax int
@@ -64,7 +68,7 @@ type deps struct {
 // RESTBridge auto-exposes the tools under /api/tools/*; the feedback tool
 // additionally answers on POST /api/v1/feedback (registered in main.go,
 // same store).
-func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, feedback *FeedbackStore, prober *probe.Runner, watchStore watchStorer, checker *watch.Checker, orderStore orderStorer, grouper *group.Assigner, initErr error) {
+func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config, feedback *FeedbackStore, prober *probe.Runner, watchStore watchStorer, checker *watch.Checker, orderStore orderStorer, grouper *group.Assigner, groupLookup watch.GroupLookup, initErr error) {
 	d := deps{
 		searcher: searcher,
 		weights: rank.Weights{
@@ -83,6 +87,7 @@ func RegisterTools(srv *mcp.Server, searcher *search.Searcher, cfg config.Config
 		// directly, which is why the gap went unnoticed).
 		orderStore:    orderStore,
 		grouper:       grouper,
+		groupLookup:   groupLookup,
 		watchOwnerMax: cfg.WatchOwnerMax,
 		initErr:       initErr,
 	}

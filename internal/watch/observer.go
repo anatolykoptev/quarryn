@@ -20,23 +20,46 @@ type Observer interface {
 	Observe(ctx context.Context, w Watch) Observation
 }
 
+// GroupLookup is the observer's read-only seam onto the durable
+// product-group registry (issue #98): *group.Store satisfies it in
+// prod; nil disables group watches and observation group-resolution.
+type GroupLookup interface {
+	// MemberURLs lists a group's known offer URLs, freshest first.
+	MemberURLs(ctx context.Context, gid int64, limit int) ([]string, error)
+	// GroupByURL resolves a canonical offer URL to its group id, 0 when
+	// the URL never proved membership.
+	GroupByURL(ctx context.Context, url string) (int64, error)
+}
+
+// groupObserveCap bounds the member offers a group check re-reads —
+// freshness beats completeness past the head of the list.
+const groupObserveCap = 5
+
 // SearcherObserver backs the checker with search.Searcher: MatchURL for
 // offer watches (same listing), SearchDetailed for query watches.
 type SearcherObserver struct {
-	s *search.Searcher
+	s      *search.Searcher
+	groups GroupLookup
 }
 
-// NewSearcherObserver wires the concrete pipeline.
-func NewSearcherObserver(s *search.Searcher) *SearcherObserver {
-	return &SearcherObserver{s: s}
+// NewSearcherObserver wires the concrete pipeline. groups may be nil —
+// group watches then observe fetch_failed and offer/query observations
+// carry no group_id.
+func NewSearcherObserver(s *search.Searcher, groups GroupLookup) *SearcherObserver {
+	return &SearcherObserver{s: s, groups: groups}
 }
 
-// Observe dispatches on watch kind: query → re-search, offer → re-fetch.
+// Observe dispatches on watch kind: query → re-search, group → member
+// offers, offer → re-fetch.
 func (o *SearcherObserver) Observe(ctx context.Context, w Watch) Observation {
-	if w.Kind == KindQuery {
+	switch w.Kind {
+	case KindQuery:
 		return o.observeQuery(ctx, w)
+	case KindGroup:
+		return o.observeGroup(ctx, w)
+	default:
+		return o.observeOffer(ctx, w)
 	}
-	return o.observeOffer(ctx, w)
 }
 
 // observeOffer re-fetches the pinned URL via MatchURL. Nil criteria → the
@@ -52,7 +75,7 @@ func (o *SearcherObserver) observeOffer(ctx context.Context, w Watch) Observatio
 		return emptyObservation(out)
 	}
 	if w.VariantSel != "" {
-		return observeVariant(w, p)
+		return o.observeVariant(ctx, w, p)
 	}
 	offerURL := p.BuyURL
 	if offerURL == "" {
@@ -62,7 +85,7 @@ func (o *SearcherObserver) observeOffer(ctx context.Context, w Watch) Observatio
 	if cur == "" {
 		cur = w.Currency
 	}
-	return Observation{
+	return o.attachGroup(ctx, w, Observation{
 		PriceMinor:   p.PriceMinor,
 		Currency:     cur,
 		Availability: p.Availability,
@@ -70,14 +93,14 @@ func (o *SearcherObserver) observeOffer(ctx context.Context, w Watch) Observatio
 		OfferID:      w.OfferID,
 		Outcome:      OutcomeOK,
 		Product:      p,
-	}
+	})
 }
 
 // observeVariant resolves the watch's pinned configuration inside the
 // extracted variant matrix (issue #115). Fail-closed: a selector that
 // matches nothing is a no_offers observation — never a silent fallthrough
 // to the listing's min-price SKU, which would watch the wrong product.
-func observeVariant(w Watch, p *extract.Product) Observation {
+func (o *SearcherObserver) observeVariant(ctx context.Context, w Watch, p *extract.Product) Observation {
 	sel := strings.TrimSpace(w.VariantSel)
 	var v *sources.Variant
 	for i := range p.Variants {
@@ -116,7 +139,7 @@ func observeVariant(w Watch, p *extract.Product) Observation {
 	scoped.Availability = avail
 	scoped.URL = offerURL
 	scoped.Variants = nil // already selected — the matrix would re-confuse the gate
-	return Observation{
+	return o.attachGroup(ctx, w, Observation{
 		PriceMinor:   price,
 		Currency:     cur,
 		Availability: avail,
@@ -124,7 +147,7 @@ func observeVariant(w Watch, p *extract.Product) Observation {
 		OfferID:      w.OfferID,
 		Outcome:      OutcomeOK,
 		Product:      &scoped,
-	}
+	})
 }
 
 // variantAvailability maps the wire flag to the canonical vocabulary.
@@ -180,7 +203,7 @@ func (o *SearcherObserver) observeQuery(ctx context.Context, w Watch) Observatio
 			Detail:  "no offer still passes live in currency " + w.Currency,
 		}
 	}
-	return Observation{
+	return o.attachGroup(ctx, w, Observation{
 		PriceMinor:   live.PriceMinor,
 		Currency:     live.Currency,
 		Availability: live.Availability,
@@ -188,7 +211,89 @@ func (o *SearcherObserver) observeQuery(ctx context.Context, w Watch) Observatio
 		OfferID:      live.OfferID,
 		Outcome:      OutcomeOK,
 		Product:      live,
+	})
+}
+
+// observeGroup re-reads the watch's pinned group member offers and
+// reports the cheapest that still passes live (issue #98) — the same
+// live-confirm discipline observeQuery applies, minus the search leg:
+// members are already identity-verified by the group gates. Every
+// observation — failed outcomes included — carries the pinned group
+// id so the history join never breaks.
+func (o *SearcherObserver) observeGroup(ctx context.Context, w Watch) Observation {
+	fail := func(outcome, detail string) Observation {
+		return Observation{Outcome: outcome, Detail: detail, GroupID: w.GroupID}
 	}
+	if o.groups == nil {
+		return fail(OutcomeFetchFailed, "group registry unavailable")
+	}
+	urls, err := o.groups.MemberURLs(ctx, w.GroupID, groupObserveCap)
+	if err != nil {
+		return fail(OutcomeFetchFailed, "group members: "+err.Error())
+	}
+	if len(urls) == 0 {
+		return fail(OutcomeNoOffers, "group has no member offers")
+	}
+	live, liveURL, lastErr := o.confirmLive(ctx, urls, w)
+	if live == nil {
+		if lastErr != "" {
+			return fail(OutcomeFetchFailed, "live confirm: "+lastErr)
+		}
+		return fail(OutcomeNoOffers,
+			"no member offer still passes live in currency "+w.Currency)
+	}
+	return Observation{
+		PriceMinor:   live.PriceMinor,
+		Currency:     live.Currency,
+		Availability: live.Availability,
+		OfferURL:     liveURL,
+		GroupID:      w.GroupID,
+		Outcome:      OutcomeOK,
+		Product:      live,
+	}
+}
+
+// attachGroup resolves the observation to its durable group id — the
+// price-history join for offer/query observations (issue #98). The
+// winning URL is tried first, then the pinned listing URL (registry
+// members are stored by listing URL — a resolved merchant BuyURL never
+// lands in the registry), then the product's own schema URL. A lookup
+// failure is silent: group resolution is additive evidence, the
+// observation stands on its own.
+func (o *SearcherObserver) attachGroup(ctx context.Context, w Watch, obs Observation) Observation {
+	if o.groups == nil {
+		return obs
+	}
+	for _, u := range groupLookupURLs(w, obs) {
+		gid, err := o.groups.GroupByURL(ctx, extract.CanonicalURL(u))
+		if err == nil && gid != 0 {
+			obs.GroupID = gid
+			return obs
+		}
+	}
+	return obs
+}
+
+// groupLookupURLs orders the candidate URLs a member lookup should try,
+// deduped — offer watches carry the merchant link in OfferURL while the
+// registry knows the listing URL.
+func groupLookupURLs(w Watch, obs Observation) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, u := range []string{obs.OfferURL, w.URL, productURL(obs)} {
+		if u != "" && !seen[u] {
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+func productURL(obs Observation) string {
+	if obs.Product == nil {
+		return ""
+	}
+	return obs.Product.URL
 }
 
 // cheapestURLs returns up to n distinct candidate URLs that passed and

@@ -121,6 +121,56 @@ func TestBuildAssignedGroupsOrphanFallback(t *testing.T) {
 
 func int64p(v int64) *int64 { return &v }
 
+func TestCollapseResults(t *testing.T) {
+	// group:true view — identity from the durable id where assigned,
+	// ephemeral key otherwise; the collapsed row faces its best offer.
+	results := []productResult{
+		{URL: "https://a.com/1", GroupID: 7, Passed: true,
+			PublicProduct: extract.PublicProduct{Source: "a.com", PriceMinor: int64p(27900), Currency: "USD"}},
+		{URL: "https://b.com/2", GroupID: 7, Passed: true,
+			PublicProduct: extract.PublicProduct{Source: "b.com", PriceMinor: int64p(25199), Currency: "USD"}},
+		priced("sku:shared9", "a.com", "https://a.com/3", 5000, true),
+		priced("sku:shared9", "c.com", "https://c.com/4", 4500, true),
+		{URL: "https://d.com/5", Passed: true,
+			PublicProduct: extract.PublicProduct{Source: "d.com"}},
+	}
+	rows := collapseResults(results)
+	if len(rows) != 3 {
+		t.Fatalf("collapsed rows = %d, want 3: %+v", len(rows), rows)
+	}
+	first := rows[0]
+	if first.URL != "https://b.com/2" || *first.PriceMinor != 25199 {
+		t.Fatalf("rep must be the best-offer member, got url=%s price=%v", first.URL, first.PriceMinor)
+	}
+	if len(first.Stores) != 2 || len(first.Offers) != 2 || first.BestOffer == nil {
+		t.Fatalf("collapsed row = %+v", first)
+	}
+	second := rows[1]
+	if len(second.Stores) != 2 || *second.BestOffer.PriceMinor != 4500 {
+		t.Fatalf("key-cluster row = %+v", second)
+	}
+	single := rows[2]
+	if single.URL != "https://d.com/5" || len(single.Stores) != 1 || len(single.Offers) != 1 {
+		t.Fatalf("singleton row = %+v", single)
+	}
+	if single.BestOffer != nil {
+		t.Fatalf("unpriced singleton must not crown itself: %+v", single.BestOffer)
+	}
+}
+
+func TestCollapseResultsMixedCurrency(t *testing.T) {
+	// Cross-currency cluster: no best_offer (a minor-unit compare would
+	// lie) and the representative falls back to the top-ranked member.
+	eur := productResult{URL: "https://eu.com/p", GroupID: 3, Passed: true,
+		PublicProduct: extract.PublicProduct{Source: "eu.com", PriceMinor: int64p(5000), Currency: "EUR"}}
+	usd := productResult{URL: "https://us.com/p", GroupID: 3, Passed: true,
+		PublicProduct: extract.PublicProduct{Source: "us.com", PriceMinor: int64p(6000), Currency: "USD"}}
+	rows := collapseResults([]productResult{eur, usd})
+	if len(rows) != 1 || rows[0].BestOffer != nil || rows[0].URL != "https://eu.com/p" {
+		t.Fatalf("mixed-currency row = %+v", rows)
+	}
+}
+
 func TestBestOfferSkipsFailed(t *testing.T) {
 	// The cheapest offer failed the caller's criteria — "best across
 	// stores" must never crown an excluded listing.
