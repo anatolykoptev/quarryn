@@ -15,6 +15,7 @@ github.com/anatolykoptev/go-enriche/structured
 ## explicit; go 1.26.3
 github.com/anatolykoptev/go-kit/breaker
 github.com/anatolykoptev/go-kit/cache
+github.com/anatolykoptev/go-kit/embed
 github.com/anatolykoptev/go-kit/env
 github.com/anatolykoptev/go-kit/httputil
 github.com/anatolykoptev/go-kit/jeff

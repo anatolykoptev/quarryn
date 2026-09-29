@@ -11,10 +11,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/anatolykoptev/go-kit/embed"
 	"github.com/anatolykoptev/go-mcpserver"
 	"github.com/anatolykoptev/quarryn/internal/api"
 	"github.com/anatolykoptev/quarryn/internal/auth"
 	"github.com/anatolykoptev/quarryn/internal/config"
+	"github.com/anatolykoptev/quarryn/internal/group"
 	"github.com/anatolykoptev/quarryn/internal/orders"
 	"github.com/anatolykoptev/quarryn/internal/postgres"
 	"github.com/anatolykoptev/quarryn/internal/probe"
@@ -84,7 +86,8 @@ func runMCPServer(cfg config.Config) error {
 			slog.Error("search pipeline init failed", slog.Any("error", err))
 		}
 		watchStore, checker := newWatcher(searcher, pgdb, cfg, err)
-		api.RegisterTools(srv, searcher, cfg, feedback, probeRunner(searcher, cfg), watchStore, checker, orderStore, err)
+		grouper := newGrouper(cfg)
+		api.RegisterTools(srv, searcher, cfg, feedback, probeRunner(searcher, cfg), watchStore, checker, orderStore, grouper, err)
 	})
 }
 
@@ -158,6 +161,48 @@ func openStores(cfg config.Config) (*postgres.DB, *api.FeedbackStore, *orders.St
 		orderStore = orders.NewStore(pgdb.Pool())
 	}
 	return pgdb, feedback, orderStore
+}
+
+// newGrouper builds the durable product-identity assigner (issue #98
+// embedding tier). It needs the groups registry (pgvector host); the
+// embedder is optional inside it — without EMBED_URL exact identifiers
+// still persist, keyless products just never join. Either failure logs
+// and returns nil: grouping degrades to ephemeral exact-only and the
+// service stays up — an auxiliary path never decides availability.
+func newGrouper(cfg config.Config) *group.Assigner {
+	if cfg.GroupsDatabaseURL == "" {
+		return nil
+	}
+	store, err := group.NewStore(context.Background(), cfg.GroupsDatabaseURL, cfg.EmbedDim)
+	if err != nil {
+		slog.Error("group store unavailable — grouping stays ephemeral", slog.Any("error", err))
+		return nil
+	}
+	var emb embed.Embedder
+	if cfg.EmbedURL != "" {
+		// Same client recipe as go-search: bearer from EMBED_TOKEN,
+		// process-local LRU, chunk cap matching the embed-server's
+		// EMBED_MAX_INPUT_ARRAY, and a circuit breaker so a dead
+		// sidecar fails fast instead of stalling every search.
+		c, cerr := embed.NewClient(cfg.EmbedURL,
+			embed.WithModel(cfg.EmbedModel),
+			embed.WithDim(cfg.EmbedDim),
+			embed.WithTimeout(15*time.Second),
+			embed.WithChunkSize(32),
+			embed.WithCircuit(embed.CircuitConfig{}),
+			embed.WithCache(group.NewEmbedCache(2048)),
+		)
+		if cerr != nil {
+			slog.Warn("embedder init failed — exact-tier grouping only",
+				slog.String("url", cfg.EmbedURL), slog.Any("error", cerr))
+		} else {
+			emb = c
+		}
+	}
+	slog.Info("group assigner up",
+		slog.String("model", cfg.EmbedModel), slog.Bool("embedder", emb != nil))
+	return group.NewAssigner(store, emb, cfg.EmbedModel,
+		float32(cfg.GroupEmbedThreshold), float32(cfg.GroupEmbedWeak), cfg.GroupTopK)
 }
 
 // probeRunner picks the acceptance-probe backend: the pipeline's own

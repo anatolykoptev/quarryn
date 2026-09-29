@@ -58,6 +58,10 @@ type productResult struct {
 	// "gtin:"/"mpn:"/"sku:" + normalized code. Results sharing a key are
 	// offers for the same product; absent when the page disclosed none.
 	GroupKey string `json:"group_key,omitempty"`
+	// GroupID is the durable cross-store group identity when the
+	// pgvector-backed registry is configured: exact-keyed results claim it
+	// outright, identifier-less results join through the embedding tier.
+	GroupID int64 `json:"group_id,omitempty"`
 }
 
 // groupOffer is one member offer inside a cross-store product group —
@@ -72,11 +76,16 @@ type groupOffer struct {
 }
 
 // productGroup is the "same product across stores" row (issue #98):
-// every offer sharing one exact identifier, plus the cheapest passing
-// offer as best_offer — nil when offers mix currencies (a raw minor-unit
-// compare across currencies would lie).
+// every offer sharing one identity — an exact identifier (key) or a
+// persisted embedding-tier match (id) — plus the cheapest passing offer
+// as best_offer, nil when offers mix currencies (a raw minor-unit compare
+// across currencies would lie). match records the strongest evidence:
+// "exact" when any member attached through an identifier, "embedding"
+// when only gated vector similarity did.
 type productGroup struct {
-	Key       string       `json:"key"`
+	ID        int64        `json:"id,omitempty"`
+	Key       string       `json:"key,omitempty"`
+	Match     string       `json:"match,omitempty"`
 	BestOffer *groupOffer  `json:"best_offer,omitempty"`
 	Offers    []groupOffer `json:"offers"`
 }
@@ -91,9 +100,10 @@ type searchOutput struct {
 	Degraded      bool                     `json:"degraded,omitempty"`
 	DegradeReason string                   `json:"degrade_reason,omitempty"`
 	Brief         *searchBrief             `json:"brief,omitempty"`
-	// Groups lists cross-store same-product clusters (issue #98): keys
-	// shared by offers from ≥2 distinct stores. Exact-identifier equality
-	// only — never title similarity.
+	// Groups lists cross-store same-product clusters (issue #98): offers
+	// from ≥2 distinct stores sharing one identity — exact identifier
+	// claims, or embedding-tier matches when the registry is configured.
+	// Never title-string similarity.
 	Groups []productGroup `json:"groups,omitempty"`
 }
 
