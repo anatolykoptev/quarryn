@@ -332,13 +332,38 @@ func TestObserveGroupCheapestMember(t *testing.T) {
 	}
 }
 
-// No registry → a group watch degrades to fetch_failed, never panics.
+// No registry → a group watch degrades to fetch_failed, never panics —
+// and the pinned id still lands on the observation so the history join
+// does not break on a failure row.
 func TestObserveGroupNoRegistry(t *testing.T) {
 	obs := NewSearcherObserver(nil, nil).Observe(t.Context(), Watch{
 		Kind: KindGroup, GroupID: 7, Currency: "USD",
 	})
 	if obs.Outcome != OutcomeFetchFailed {
 		t.Fatalf("outcome = %q, want fetch_failed", obs.Outcome)
+	}
+	if obs.GroupID != 7 {
+		t.Fatalf("failed observation must keep the pinned group_id, got %d", obs.GroupID)
+	}
+}
+
+// The member lookup must try the listing URL, not only the resolved
+// merchant link — registry members are keyed by listing URL, so a
+// buy_url hop would otherwise drop the history join.
+func TestGroupLookupURLs(t *testing.T) {
+	w := Watch{URL: "https://store.com/listing"}
+	obs := Observation{
+		OfferURL: "https://merchant.com/buy",
+		Product:  &extract.Product{URL: "https://store.com/listing"},
+	}
+	urls := groupLookupURLs(w, obs)
+	if len(urls) != 2 || urls[0] != "https://merchant.com/buy" || urls[1] != "https://store.com/listing" {
+		t.Fatalf("lookup urls = %v — want offer, then deduped listing", urls)
+	}
+	// Offer/watch URL identical → single candidate.
+	obs.OfferURL = w.URL
+	if urls := groupLookupURLs(w, obs); len(urls) != 1 {
+		t.Fatalf("dedup failed: %v", urls)
 	}
 }
 

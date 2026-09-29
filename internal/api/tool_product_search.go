@@ -74,7 +74,10 @@ func handleProductSearch(ctx context.Context, d deps, in productSearchInput) (*m
 	}
 	if in.Group {
 		resp.Products = collapseResults(resp.Results)
-		resp.Results = nil
+		// An empty non-nil slice keeps "results":[] out of the response —
+		// the collapsed rows live in products[], and a null field would
+		// read as a shape violation to clients.
+		resp.Results = []productResult{}
 	}
 	return jsonResult(resp)
 }
