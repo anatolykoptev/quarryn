@@ -54,6 +54,12 @@ code on either side face a higher cosine bar. The embedding tier is
 strictly additive: with it off or unreachable, grouping falls back to
 exact-identifier keys only and search never fails for it.
 
+`group:true` swaps `results[]` for `products[]` — one row per product
+identity (issue #98): same-product offers across stores merge into a
+single entry whose product fields face the `best_offer` member, with
+`stores[]` (every distinct source domain) and `offers[]` alongside.
+Ungrouped results stay as singleton rows; nothing is dropped.
+
 ### `product_match`
 
 Judge one caller-supplied product URL through the same extract+match path.
@@ -79,10 +85,11 @@ Price/restock watches on Postgres. `action`: `add | list | get | cancel | check_
 
 | Arg | Type | Notes |
 |---|---|---|
-| `kind` | `offer|query` | `offer` re-fetches one pinned URL; `query` re-runs search and takes the cheapest passed offer in `currency`. Every observation reads the page live — the 24h extraction cache is bypassed so alerts never fire on stale prices |
+| `kind` | `offer|query|group` | `offer` re-fetches one pinned URL; `query` re-runs search and takes the cheapest passed offer in `currency`; `group` re-reads the live member offers of a durable product group and takes the cheapest across stores — the product, not one listing. Every observation reads the page live — the 24h extraction cache is bypassed so alerts never fire on stale prices |
 | `url` / `offer_id` | string | `add kind=offer`: page to re-fetch; `offer_id` optional stable id |
 | `variant` | string | `add kind=offer` only: pin one configuration — variant id or option-title substring (`"64GB"`). The observer follows that variant's price/availability/URL; a selector matching nothing fails closed (`no_offers`), never watches the wrong SKU |
-| `query` / `criteria` | string / string[] | `add kind=query`: search text + criteria |
+| `query` / `criteria` | string / string[] | `add kind=query`: search text + criteria; `kind=group` also accepts `criteria` — a live member offer only wins while it still passes |
+| `group_id` | int | `add kind=group` (required): durable product group id from `product_search` — validated against the registry at add time |
 | `label` | string | Human name for notifications |
 | `notify_on` | `price\|restock\|any` | Default `price`. `restock` fires on unbuyable→buyable transitions (`out_of_stock\|discontinued` → any orderable state); `any` = either trigger |
 | `target_price` | float | Notify when price ≤ target (1% re-notify bucket). Required for `price`/`any` unless `target_pct` is set |
@@ -90,7 +97,7 @@ Price/restock watches on Postgres. `action`: `add | list | get | cancel | check_
 | `condition` | string | Optional free-form gate evaluated per check by the match service (needs `JEFF_URL`); a fired trigger notifies only if the condition passes. Max 500 runes |
 | `currency` | string | ISO 4217, required |
 | `ttl_hours` | int | Watch lifetime, default 720 (30d), capped 90d |
-| `interval_minutes` | int | Check cadence; floors 60 (offer) / 360 (query) |
+| `interval_minutes` | int | Check cadence; floors 60 (offer) / 120 (group) / 360 (query) |
 | `watch_id` | int | `get` / `cancel` / `check_now` target |
 | `include_inactive` | bool | `list`: include cancelled/expired |
 | `history` / `history_limit` | bool / int | `list`: attach observation history per watch (newest first). `get` always includes history. Default 100 rows, max 500 |
@@ -114,6 +121,11 @@ failure — transient, never counts). The extract stage's own disposition
 label rides in `detail` as `extract: <label>`. A `condition` whose
 evaluator is unreachable or rejects the observation fails closed — the
 check records the reason and no alert is sent.
+
+History rows may carry `group_id` — the pinned id for `kind=group`
+watches, or the durable group the winning offer URL belongs to for
+offer/query observations. That is the join key composing one watch's
+price history into the product's cross-store price history.
 
 ### `product_order`
 
