@@ -252,6 +252,7 @@ func mcpConfig(cfg config.Config, mcpReceiving []mcp.Middleware, routes func(*ht
 		SchemaCache:                mcp.NewSchemaCache(),
 		DisableLocalhostProtection: true,
 		SessionTimeout:             10 * time.Minute,
+		Stateless:                  new(bool),
 		ToolTimeout:                cfg.ToolTimeout,
 		ToolTimeouts:               toolTimeouts(cfg),
 		RESTBridge:                 true,
