@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.1](https://github.com/anatolykoptev/quarryn/compare/v1.27.0...v1.27.1) (2026-10-08)
+
+
+### Fixed
+
+* **mcp:** enable stateful sessions for standalone GET stream ([#140](https://github.com/anatolykoptev/quarryn/issues/140)) ([9bd4acb](https://github.com/anatolykoptev/quarryn/commit/9bd4acb3248f31a56f0dd716ea853b2b43385d0c))
+
 ## [1.27.0](https://github.com/anatolykoptev/quarryn/compare/v1.26.2...v1.27.0) (2026-09-29)
 
 
