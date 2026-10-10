@@ -251,14 +251,17 @@ func mcpConfig(cfg config.Config, mcpReceiving []mcp.Middleware, routes func(*ht
 		Port:                       cfg.Port,
 		SchemaCache:                mcp.NewSchemaCache(),
 		DisableLocalhostProtection: true,
-		SessionTimeout:             10 * time.Minute,
-		Stateless:                  new(bool),
-		ToolTimeout:                cfg.ToolTimeout,
-		ToolTimeouts:               toolTimeouts(cfg),
-		RESTBridge:                 true,
-		JSONResponse:               false,
-		ToolKeepaliveInterval:      10 * time.Second,
-		MCPReceivingMiddleware:     mcpReceiving,
+		// Stateless (the go-mcpserver default) on purpose: GET /mcp answers
+		// 405 + Allow: POST, which rmcp (Devin CLI) reads as "no standalone
+		// stream". #140 flipped to stateful to stop an rmcp SSE error loop, but
+		// the loop rate never changed; the flip only added session expiry and
+		// dropped MCP 2026-07-28, which only stateless servers serve.
+		ToolTimeout:            cfg.ToolTimeout,
+		ToolTimeouts:           toolTimeouts(cfg),
+		RESTBridge:             true,
+		JSONResponse:           false,
+		ToolKeepaliveInterval:  10 * time.Second,
+		MCPReceivingMiddleware: mcpReceiving,
 		// Bearer auth wraps the WHOLE mux (REST + MCP + extra routes) —
 		// /healthz is exempted inside the middleware.
 		Middleware: []mcpserver.Middleware{auth.Bearer(cfg.InternalSecret)},

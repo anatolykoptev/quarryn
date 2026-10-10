@@ -6,7 +6,7 @@ require (
 	// Pinned pseudo-version of the unmerged wowa branch — bump to a
 	// released tag once go-kit PR #270 merges (issue #1).
 	github.com/anatolykoptev/go-kit v0.97.15-0.20260925040214-1269d4391b4f
-	github.com/anatolykoptev/go-mcpserver v0.18.0
+	github.com/anatolykoptev/go-mcpserver v0.21.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/prometheus/client_golang v1.24.1
 )

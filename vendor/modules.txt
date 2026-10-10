@@ -25,7 +25,7 @@ github.com/anatolykoptev/go-kit/rerank
 github.com/anatolykoptev/go-kit/retry
 github.com/anatolykoptev/go-kit/score
 github.com/anatolykoptev/go-kit/wowa
-# github.com/anatolykoptev/go-mcpserver v0.18.0
+# github.com/anatolykoptev/go-mcpserver v0.21.0
 ## explicit; go 1.26
 github.com/anatolykoptev/go-mcpserver
 # github.com/anatolykoptev/go-stealth v1.22.0

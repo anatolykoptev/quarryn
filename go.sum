@@ -6,8 +6,8 @@ github.com/anatolykoptev/go-enriche v1.40.3 h1:a7E/GM5owD7DowI0iOqb9t66NfL2JnERS
 github.com/anatolykoptev/go-enriche v1.40.3/go.mod h1:r7KqGlbiz1BqkvOS5tTUT6y6kHDKziEOvTn7SaVGLAM=
 github.com/anatolykoptev/go-kit v0.97.15-0.20260925040214-1269d4391b4f h1:W8n0XOwPWuRusJQIwd8atzlYHPLHXdc4GqS09XgCLTc=
 github.com/anatolykoptev/go-kit v0.97.15-0.20260925040214-1269d4391b4f/go.mod h1:YL1QGRzOB0EBUUCwSFPP0Wnfa+hCrCG7JwcSACsoNy4=
-github.com/anatolykoptev/go-mcpserver v0.18.0 h1:NuDgzucheEzJUDmcebM1C7NdfCz2IUKGr9vVqkjICXk=
-github.com/anatolykoptev/go-mcpserver v0.18.0/go.mod h1:tLjcm6ftgBQoiz7b2AdL5B7EVlrdYe0uehmfk3TiPjU=
+github.com/anatolykoptev/go-mcpserver v0.21.0 h1:1LZ+pFTnjSDFvcb6O6e0SawBevzt/jDEi/3vg6RlN84=
+github.com/anatolykoptev/go-mcpserver v0.21.0/go.mod h1:4KB3DrB9+4pLCXslJFoVx6Q8+67a/R8OcbZ3XM8dcw4=
 github.com/anatolykoptev/go-stealth v1.22.0 h1:0lIVJw6D4mWgKEdLk/oWwUY0GsAGcmKFWxPaege5WWQ=
 github.com/anatolykoptev/go-stealth v1.22.0/go.mod h1:F5CBYCCWBfQ+Acf3njuGHGWgn/Ce79JV3gx002vg1Bs=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
