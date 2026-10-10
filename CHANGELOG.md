@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.2](https://github.com/anatolykoptev/quarryn/compare/v1.27.1...v1.27.2) (2026-10-10)
+
+
+### Fixed
+
+* **mcp:** back to stateless + go-mcpserver v0.21.0 (MCP 2026-07-28) ([#142](https://github.com/anatolykoptev/quarryn/issues/142)) ([7c543c5](https://github.com/anatolykoptev/quarryn/commit/7c543c5c8bc443a3c687a8036cfd6d2837a192f0))
+
 ## [1.27.1](https://github.com/anatolykoptev/quarryn/compare/v1.27.0...v1.27.1) (2026-10-08)
 
 
