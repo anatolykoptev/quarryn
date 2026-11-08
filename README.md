@@ -104,5 +104,12 @@ say so. Full env table: `docs/OPERATIONS.md`.
 
 ---
 
-Apache-2.0 · Contributing: `make preflight` gates every merge — see
-`CONTRIBUTING.md` · Architecture and API details under `docs/`.
+## Status and documents
+
+Released continuously (release-please; versions and history in
+[CHANGELOG.md](CHANGELOG.md)). Go 1.26, dependencies vendored. Every document is listed in
+[docs/INDEX.md](docs/INDEX.md): [ARCHITECTURE.md](ARCHITECTURE.md), [PRODUCT.md](PRODUCT.md),
+[docs/API.md](docs/API.md), [docs/OPERATIONS.md](docs/OPERATIONS.md) (full environment table).
+
+Apache-2.0 ([LICENSE](LICENSE)) · Contributing: `make preflight` gates every merge — see
+[CONTRIBUTING.md](CONTRIBUTING.md) · Security: [SECURITY.md](SECURITY.md).
