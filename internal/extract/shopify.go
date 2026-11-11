@@ -14,7 +14,7 @@ import (
 
 // Shopify storefronts expose a deterministic JSON mirror of every product
 // page at /products/<handle>.js — full variant matrix (option labels,
-// minor-unit prices, availability), no HTML scraping required. This file
+// minor-unit prices, availability), no HTML parsing required. This file
 // is the rescue path for candidates whose adapter leg could not carry
 // variants (the UCP catalog has no option titles) and for direct
 // product_match/watch URLs on shopify storefronts (issue #115).
