@@ -5,7 +5,7 @@
 An agent-native product discovery and post-purchase service. Not a scraper —
 the durable layer between "what do I want to buy" and "did it arrive, can I
 still return it". Built so that agent harnesses call it as a tool, humans get
-alerts, and nobody rebuilds scraping infra per query.
+alerts, and nobody rebuilds data-collection infrastructure per query.
 
 ## Problem
 
@@ -29,7 +29,7 @@ and each guarantee is a prompt suggestion, not code.
 A self-hosted Go service, exposed over REST + MCP:
 
 ```
-query → plan (deterministic criteria) → adapters (stealth scraping fleet)
+query → plan (deterministic criteria) → adapters (stealth fetching fleet)
       → normalize (money minor units, condition enum, availability)
       → gates (SSRF, adapter manifest hosts, price/condition/availability)
       → Jeff/Jev subjective match → rank → offer_id-stamped results
@@ -65,7 +65,7 @@ Four pillars:
 | Deal sites | Slickdeals | human deal discovery | automation surface |
 
 This service is a **tool for the harnesses**, not a competitor — MCP is the
-interface precisely so agents consume it instead of re-deriving scraping
+interface precisely so agents consume it instead of re-deriving data collection
 infrastructure from prompts.
 
 ## Moat
