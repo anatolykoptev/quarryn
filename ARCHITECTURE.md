@@ -19,10 +19,18 @@ internal/
   orders          MIME parse (stdlib, multipart, HTML→text), retailer
                   rules + generic fallback, tracking regex, merge-on-ingest,
                   event ledger, Postgres store
-  postgres        pgxpool + goose embedded migrations (0001 feedback,
-                  0002 watches, 0003 orders)
-  api             MCP tool surface + REST twins + deps wiring
-  feedback        outcome sink: PG primary, JSONL fallback
+  group           durable product-identity registry (exact keys, then a
+                  gated embedding tier), Postgres store
+  trust           seed domain-trust tiers that annotate results
+  money           minor-unit price conversion
+  auth            inbound bearer middleware (everything but /healthz)
+  search          wires sourcing, extraction and match into the funnel
+                  entrypoint the MCP tools call
+  postgres        pgxpool + goose embedded migrations (0001 feedback
+                  through 0009 group watches)
+  api             MCP tool surface + REST twins + deps wiring; the
+                  feedback outcome sink (PG primary, JSONL fallback)
+                  lives in api/feedback.go
   probe           live acceptance probes (jeff/wowa reachability,
                   injection canary)
   config          env → Config (single source of truth for env names)
