@@ -6,6 +6,10 @@
 make preflight   # gofmt → vet → golangci-lint → build → test -race
 ```
 
+The toolchain is Go 1.26 (dependencies are vendored; `make vendor` refreshes them) and the
+linter is `golangci-lint` v2. CI (`preflight.yml`) runs exactly `make preflight` on
+`ubuntu-24.04-arm`; a pull request that changes only documents skips it.
+
 Always run with `GOWORK=off` (the Makefile does) — a stray `go.work` on
 the host breaks builds. Pre-commit hooks run leak-scan + lint; keep them
 installed.
