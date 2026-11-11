@@ -53,7 +53,7 @@ watches and re-probes pin to.
 ## Features
 
 - **Multi-source adapters** — eBay, Etsy, Slickdeals, Shopify storefronts;
-  machine-readable/API tier only, no login-walled scraping.
+  machine-readable/API tier only, no login-walled fetching.
 - **Deterministic gates** — price/condition/availability constraints in
   code; SSRF screen at funnel ingress; per-adapter host manifests.
 - **LLM match, honestly degraded** — subjective fit judged per candidate;
