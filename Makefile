@@ -1,7 +1,7 @@
 BINARY = bin/quarryn
 SERVICE = quarryn
 
-.PHONY: preflight build test lint vendor clean
+.PHONY: preflight build test test-db lint vendor clean
 
 # Fleet gate: gofmt → vet → lint → build → test (-race). Mirrors go-search /
 # go-wowa preflight; GOWORK=off guards against a stray go.work on the host.
@@ -27,6 +27,10 @@ build:
 
 test:
 	GOWORK=off go test -race -count=1 ./...
+
+# Live-Postgres tests against a throwaway pgvector container (never the live cluster).
+test-db:
+	@bash scripts/test-db.sh
 
 lint:
 	GOWORK=off golangci-lint run ./...

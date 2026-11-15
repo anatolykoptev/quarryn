@@ -8,15 +8,14 @@ import (
 	"testing"
 	"time"
 
+	kitdbtest "github.com/anatolykoptev/go-kit/pgutil/dbtest"
 	"github.com/anatolykoptev/quarryn/internal/postgres"
 )
 
 func pgConnect(t *testing.T) *postgres.DB {
 	t.Helper()
 	dsn := os.Getenv("PG_LIVE_DSN")
-	if dsn == "" {
-		t.Skip("PG_LIVE_DSN unset — live postgres smoke skipped")
-	}
+	kitdbtest.MustBeScratch(t, dsn) // skips when unset; refuses a server that holds real data
 	db, err := postgres.New(context.Background(), dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)

@@ -5,16 +5,17 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	kitdbtest "github.com/anatolykoptev/go-kit/pgutil/dbtest"
 )
 
 // TestLivePG is the env-gated live smoke: PG_LIVE_DSN=postgres://… makes
 // it connect, run migrations and round-trip one feedback row against the
-// real shared instance. Skipped by default so unit runs never need a DB.
+// throwaway Postgres (`make test-db`); the guard refuses a server that holds
+// real data. Skipped by default so unit runs never need a DB.
 func TestLivePG(t *testing.T) {
 	dsn := os.Getenv("PG_LIVE_DSN")
-	if dsn == "" {
-		t.Skip("PG_LIVE_DSN unset — live postgres smoke skipped")
-	}
+	kitdbtest.MustBeScratch(t, dsn) // skips when unset; refuses a server that holds real data
 	ctx := context.Background()
 	db, err := New(ctx, dsn)
 	if err != nil {
