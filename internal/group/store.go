@@ -391,6 +391,64 @@ func (s *Store) AddMember(ctx context.Context, gid int64, m Member, vec []float3
 	return tx.Commit(ctx)
 }
 
+// embeddingGroups lists centroid-carrying groups in id order after
+// afterID — the reembed-groups command pages through them for the
+// prefix migration. Groups without an embedding stay unreachable to
+// Nearest today, so the pass leaves them alone.
+func (s *Store) embeddingGroups(ctx context.Context, afterID int64, limit int) ([]embeddingGroup, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, label FROM product_groups
+		 WHERE embedding IS NOT NULL AND id > $1
+		 ORDER BY id LIMIT $2`, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []embeddingGroup
+	for rows.Next() {
+		var g embeddingGroup
+		if err := rows.Scan(&g.ID, &g.Label); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+// foldableTitles lists the member titles that folded a vector into the
+// group centroid, in fold order — 'exact'-provenance members claimed
+// identity without carrying a vector, and a title that fails
+// embeddable() never embedded in the first place.
+func (s *Store) foldableTitles(ctx context.Context, gid int64) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT title FROM product_group_members
+		 WHERE group_id = $1 AND match <> 'exact' AND title <> ''
+		 ORDER BY first_seen, url`, gid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// setEmbedding replaces a group's centroid and sample count — the
+// re-embed pass writes straight through, one row per call, so a stop
+// mid-sweep leaves only finished groups migrated.
+func (s *Store) setEmbedding(ctx context.Context, gid int64, vec []float32, members int) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE product_groups SET embedding = $1::vector, members = $2, updated_at = now() WHERE id = $3`,
+		vectorLit(vec), members, gid)
+	return err
+}
+
 // insertMember inserts the offer row, reporting whether it was new. A
 // re-seen URL only refreshes last_seen; the first-seen match provenance
 // stands — re-attaching through a different tier does not rewrite how
