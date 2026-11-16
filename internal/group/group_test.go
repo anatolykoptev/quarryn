@@ -3,6 +3,7 @@ package group
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -28,6 +29,7 @@ type fakeGroup struct {
 	model   string
 	keys    []string
 	members []Member
+	mvecs   [][]float32 // vec arg of each new-member AddMember, append-aligned
 }
 
 func newFakeStore() *fakeStore {
@@ -96,7 +98,7 @@ func (f *fakeStore) CreateGroup(_ context.Context, label string, vec []float32, 
 	return id, nil
 }
 
-func (f *fakeStore) AddMember(_ context.Context, gid int64, m Member, _ []float32, keys []string) error {
+func (f *fakeStore) AddMember(_ context.Context, gid int64, m Member, vec []float32, keys []string) error {
 	if f.failNext {
 		return errors.New("pg down")
 	}
@@ -107,6 +109,7 @@ func (f *fakeStore) AddMember(_ context.Context, gid int64, m Member, _ []float3
 		}
 	}
 	g.members = append(g.members, m)
+	g.mvecs = append(g.mvecs, vec)
 	for _, k := range keys {
 		if _, taken := f.byKey[k]; !taken {
 			f.byKey[k] = gid
@@ -130,6 +133,9 @@ func (f fakeEmb) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	}
 	out := make([][]float32, len(texts))
 	for i, t := range texts {
+		// Fixtures are keyed on the bare title — the assigner wraps the
+		// embedder in e5 role prefixes this fake does not model.
+		t = strings.TrimPrefix(strings.TrimPrefix(t, "query: "), "passage: ")
 		out[i] = f.vecs[t]
 	}
 	return out, nil
@@ -145,6 +151,57 @@ func (f fakeEmb) EmbedQuery(ctx context.Context, text string) ([]float32, error)
 
 func (f fakeEmb) Dimension() int { return 4 }
 func (f fakeEmb) Close() error   { return nil }
+
+// recEmb records the exact texts it was asked to embed and resolves
+// vectors from a map keyed by the FULL text — e5 role prefix included —
+// so tests can give the query and passage sides deliberately different
+// vectors and observe which role each code path sent.
+type recEmb struct {
+	seen []string
+	vecs map[string][]float32
+	err  error
+}
+
+func (r *recEmb) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	r.seen = append(r.seen, texts...)
+	out := make([][]float32, len(texts))
+	for i, t := range texts {
+		out[i] = r.vecs[t]
+	}
+	return out, nil
+}
+
+func (r *recEmb) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+	v, err := r.Embed(ctx, []string{text})
+	if err != nil || len(v) == 0 {
+		return nil, err
+	}
+	return v[0], nil
+}
+
+func (r *recEmb) Dimension() int { return 4 }
+func (r *recEmb) Close() error   { return nil }
+
+// approxVec reports elementwise equality within eps — centroid math
+// produces floats that DeepEqual would reject over rounding dust.
+func approxVec(a, b []float32, eps float32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		d := a[i] - b[i]
+		if d < 0 {
+			d = -d
+		}
+		if d > eps {
+			return false
+		}
+	}
+	return true
+}
 
 // cosine over the tiny test vectors (embed.Cosine equivalent kept local
 // so tests stay independent of the kit's exact float semantics).
@@ -510,6 +567,53 @@ func TestKeyConflicts(t *testing.T) {
 	}
 	if keyConflicts("", []string{"gtin:b"}) || keyConflicts("gtin:a", nil) {
 		t.Error("empty side never conflicts")
+	}
+}
+
+// Every e5 text the assigner sends must carry its role prefix: the
+// lookup embedding "query: " and the stored embedding "passage: "
+// (multilingual-e5 asymmetric convention — go-kit/embed Prefixed).
+func TestAssignE5PrefixesRecorded(t *testing.T) {
+	st := newFakeStore()
+	emb := &recEmb{vecs: map[string][]float32{}}
+	a := NewAssigner(st, emb, "test", 0.90, 0.94, 5)
+	assign(t, a, []extract.Product{
+		prod("Sony WH-1000XM5", "https://a.com/1", "a.com"),
+		prod("WH1000XM5 black", "https://b.com/2", "b.com"),
+	})
+	for _, title := range []string{"Sony WH-1000XM5", "WH1000XM5 black"} {
+		if !slices.Contains(emb.seen, "query: "+title) {
+			t.Errorf("lookup embedding must send e5 query prefix %q — recorded %v", "query: "+title, emb.seen)
+		}
+		if !slices.Contains(emb.seen, "passage: "+title) {
+			t.Errorf("stored embedding must send e5 passage prefix %q — recorded %v", "passage: "+title, emb.seen)
+		}
+	}
+}
+
+// The two roles must not be interchanged: the vector compared against
+// stored centroids is the query-role one, the vector written into group
+// rows and folded into centroids is the passage-role one.
+func TestAssignE5QueryMatchesPassageStores(t *testing.T) {
+	st := newFakeStore()
+	emb := &recEmb{vecs: map[string][]float32{
+		"passage: Sony WH-1000XM5": {0, 1, 0, 0},
+		"query: Sony WH-1000XM5":   {1, 0, 0, 0},
+		"query: WH1000XM5 black":   {0, 0.99, 0.1, 0}, // near the stored passage centroid
+		"passage: WH1000XM5 black": {0, 0, 0, 1},      // orthogonal — a storage-role lookup must NOT match
+	}}
+	a := NewAssigner(st, emb, "test", 0.90, 0.94, 5)
+	out := assign(t, a, []extract.Product{prod("Sony WH-1000XM5", "https://a.com/1", "a.com")})
+	gid := out[0].GroupID
+	if got := st.groups[gid].vec; !approxVec(got, []float32{0, 1, 0, 0}, 1e-6) {
+		t.Fatalf("seeded centroid must be the passage-role vector, got %v", got)
+	}
+	out = assign(t, a, []extract.Product{prod("WH1000XM5 black", "https://b.com/2", "b.com")})
+	if out[0].GroupID != gid {
+		t.Fatalf("query vector must match the stored passage centroid, got %+v", out[0])
+	}
+	if got := st.groups[gid].mvecs[0]; !approxVec(got, []float32{0, 0, 0, 1}, 1e-6) {
+		t.Fatalf("joined member must fold the passage-role vector, got %v", got)
 	}
 }
 

@@ -116,6 +116,18 @@ Two transports into `POST /api/v1/orders/ingest` (raw RFC822, bearer):
 Duplicates merge on `(retailer_domain, order_no)` — both pipes can be
 active without double-creating orders.
 
+## Maintenance
+
+- `quarryn reembed-groups [-batch N] [-from-id ID]` — one-off migration:
+  rewrites every `product_groups` centroid in the passage-prefixed e5
+  space. Required once after embed calls gained `query: `/`passage: `
+  role prefixes — vectors stored before that live in the bare-text space
+  and must not be matched against prefixed queries. Recomputes each
+  centroid from its member titles (never from the stored vector), so the
+  pass is idempotent and `-from-id` resumes an interrupted run; progress
+  counts log per batch. Needs `GROUPS_DATABASE_URL` + `EMBED_URL`
+  (`EMBED_TOKEN` read by go-kit).
+
 ## Health and observability
 
 - `GET /healthz` — liveness.

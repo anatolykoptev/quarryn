@@ -60,7 +60,11 @@ type Assignment struct {
 // GROUPS_DATABASE_URL is set; the embedder may still be nil (exact tier
 // persists without embeddings).
 type Assigner struct {
-	emb       embed.Embedder
+	// e5 asymmetric retrieval needs both roles from one product text:
+	// qemb embeds the lookup side ("query: " — compared against stored
+	// centroids), demb the storage side ("passage: " — folded into them).
+	qemb      embed.Embedder
+	demb      embed.Embedder
 	store     groupStore
 	model     string
 	thrStrong float32 // cosine floor when model codes are present on both sides
@@ -70,8 +74,16 @@ type Assigner struct {
 
 // NewAssigner wires the tiers: store gives exact keys a durable home;
 // emb additionally enables the embedding tier for keyless products.
+// The e5 role prefixes are applied through the kit's Prefixed decorator —
+// do NOT combine it with backend prefix options (WithTextPrefix et al.
+// would double-prefix).
 func NewAssigner(store groupStore, emb embed.Embedder, model string, thrStrong, thrWeak float32, topK int) *Assigner {
-	return &Assigner{emb: emb, store: store, model: model, thrStrong: thrStrong, thrWeak: thrWeak, topK: topK}
+	var qemb, demb embed.Embedder
+	if emb != nil {
+		qemb = embed.Prefixed(emb, embed.E5QueryPrefix)
+		demb = embed.Prefixed(emb, embed.E5PassagePrefix)
+	}
+	return &Assigner{qemb: qemb, demb: demb, store: store, model: model, thrStrong: thrStrong, thrWeak: thrWeak, topK: topK}
 }
 
 // Assign resolves every product to a group id, index-aligned with the
@@ -91,14 +103,14 @@ func (a *Assigner) Assign(ctx context.Context, products []extract.Product) []Ass
 		keys[i] = products[i].GroupKey()
 	}
 
-	var vecs [][]float32
-	if a.emb != nil {
-		vecs = a.embedAll(ctx, texts)
+	var qvecs, dvecs [][]float32
+	if a.qemb != nil {
+		qvecs, dvecs = a.embedAll(ctx, texts)
 	}
 
 	var pending []*pendingCluster
 	for i := range products {
-		out[i] = a.assignOne(ctx, i, products[i], texts[i], rows[i], keys[i], vecsAt(vecs, i), &pending)
+		out[i] = a.assignOne(ctx, i, products[i], texts[i], rows[i], keys[i], vecsAt(qvecs, i), vecsAt(dvecs, i), &pending)
 	}
 
 	a.flush(ctx, pending, out)
@@ -112,7 +124,7 @@ func (a *Assigner) Assign(ctx context.Context, products []extract.Product) []Ass
 
 // assignOne resolves one product: exact claim → stored vector match →
 // pending cluster → new pending cluster → unassigned.
-func (a *Assigner) assignOne(ctx context.Context, i int, p extract.Product, text string, rows []string, key string, vec []float32, pending *[]*pendingCluster) Assignment {
+func (a *Assigner) assignOne(ctx context.Context, i int, p extract.Product, text string, rows []string, key string, qvec, dvec []float32, pending *[]*pendingCluster) Assignment {
 	m := Member{URL: extract.CanonicalURL(p.URL), Domain: p.Source, Title: text, Evidence: rows}
 
 	// Exact tier: a claimed key resolves immediately — embeddings never
@@ -133,28 +145,28 @@ func (a *Assigner) assignOne(ctx context.Context, i int, p extract.Product, text
 	// product carrying an exact key may only join groups that do not
 	// claim a conflicting key of the same keyspace — embeddings must
 	// never merge two distinct identifiers into one group.
-	if vec != nil {
-		if gid, sim, ok := a.matchStored(ctx, text, rows, vec, key); ok {
+	if qvec != nil {
+		if gid, sim, ok := a.matchStored(ctx, text, rows, qvec, key); ok {
 			m.Match = matchLabel(sim)
-			a.join(ctx, gid, m, vec, exactKeys(key))
+			a.join(ctx, gid, m, dvec, exactKeys(key))
 			groupAssign.WithLabelValues("embed", "joined").Inc()
 			return Assignment{GroupID: gid, Exact: key != "", Sim: sim}
 		}
-		if c, sim := matchPending(*pending, text, rows, vec, key, a.thrStrong, a.thrWeak); c != nil {
+		if c, sim := matchPending(*pending, text, rows, qvec, key, a.thrStrong, a.thrWeak); c != nil {
 			m.Match = matchLabel(sim) // same provenance form as stored joins
-			c.add(i, vec, m, key)
+			c.add(i, dvec, m, key)
 			return Assignment{GroupID: -1, Exact: key != "", Sim: sim} // resolved at flush
 		}
 	}
 	// A keyless, unembeddable name has nothing a later offer could match
 	// on — leave it unassigned rather than write a dead group.
-	if vec == nil && key == "" {
+	if qvec == nil && key == "" {
 		return Assignment{}
 	}
 	// No match anywhere: start a pending cluster — flushed to a new group
 	// row after the pass so siblings later in the list can join.
 	c := &pendingCluster{repText: text, repRows: rows}
-	c.add(i, vec, m, key)
+	c.add(i, dvec, m, key)
 	*pending = append(*pending, c)
 	return Assignment{GroupID: -1, Exact: key != ""}
 }
@@ -169,11 +181,11 @@ type pendingCluster struct {
 	keys    []string
 }
 
-// pendingEntry keeps a member's index, vector and evidence aligned —
-// members without vectors interleave freely.
+// pendingEntry keeps a member's index, passage-side vector and evidence
+// aligned — members without vectors interleave freely.
 type pendingEntry struct {
 	idx   int
-	vec   []float32
+	vec   []float32 // passage role — the value folded into the centroid and stored
 	m     Member
 	exact bool // the entry carried an exact-identifier key
 }
@@ -188,10 +200,21 @@ func (c *pendingCluster) add(i int, vec []float32, m Member, key string) {
 // centroid is the member-vector mean, L2-normalised — same convention the
 // store applies when advancing a group centroid.
 func (c *pendingCluster) centroid() []float32 {
+	vecs := make([][]float32, len(c.entries))
+	for i, e := range c.entries {
+		vecs[i] = e.vec
+	}
+	return meanCentroid(vecs)
+}
+
+// meanCentroid averages the non-nil vectors and L2-normalises — the one
+// centroid convention shared by pending clusters, the store's running
+// mean, and the re-embed pass.
+func meanCentroid(vecs [][]float32) []float32 {
 	dim := 0
-	for _, e := range c.entries {
-		if e.vec != nil {
-			dim = len(e.vec)
+	for _, v := range vecs {
+		if v != nil {
+			dim = len(v)
 			break
 		}
 	}
@@ -200,13 +223,13 @@ func (c *pendingCluster) centroid() []float32 {
 	}
 	out := make([]float32, dim)
 	var n float32
-	for _, e := range c.entries {
-		if e.vec == nil {
+	for _, v := range vecs {
+		if v == nil {
 			continue
 		}
 		n++
 		for j := range out {
-			out[j] += e.vec[j]
+			out[j] += v[j]
 		}
 	}
 	if n == 0 {
@@ -224,8 +247,8 @@ func (c *pendingCluster) centroid() []float32 {
 // check (single-linkage drift bound); at least one stored member must
 // additionally agree on both discriminators and specs — a group is only
 // as permissive as its own members' evidence.
-func (a *Assigner) matchStored(ctx context.Context, text string, rows []string, vec []float32, key string) (int64, float32, bool) {
-	cands, err := a.store.Nearest(ctx, vec, a.model, a.topK)
+func (a *Assigner) matchStored(ctx context.Context, text string, rows []string, qvec []float32, key string) (int64, float32, bool) {
+	cands, err := a.store.Nearest(ctx, qvec, a.model, a.topK)
 	if err != nil {
 		slog.Warn("group: nearest lookup failed", slog.Any("error", err))
 		groupAssign.WithLabelValues("embed", "store_error").Inc()
@@ -302,7 +325,7 @@ func (a *Assigner) memberAgrees(ctx context.Context, gid int64, text string, row
 // matchPending applies the same recall+gate bar against clusters forming
 // in this result set, so two keyless offers of one product group together
 // even when neither has been seen before.
-func matchPending(pending []*pendingCluster, text string, rows []string, vec []float32, key string, thrStrong, thrWeak float32) (*pendingCluster, float32) {
+func matchPending(pending []*pendingCluster, text string, rows []string, qvec []float32, key string, thrStrong, thrWeak float32) (*pendingCluster, float32) {
 	var best *pendingCluster
 	var bestSim float32
 	for _, p := range pending {
@@ -313,7 +336,7 @@ func matchPending(pending []*pendingCluster, text string, rows []string, vec []f
 		if cv == nil {
 			continue
 		}
-		sim := embed.Cosine(vec, cv)
+		sim := embed.Cosine(qvec, cv)
 		ok, weak := discsCompatible(text, p.repText)
 		if !ok || !match.SpecsCompatible(rows, p.repRows) {
 			continue
@@ -371,9 +394,10 @@ func (a *Assigner) flush(ctx context.Context, pending []*pendingCluster, out []A
 	}
 }
 
-// embedAll batch-embeds the embeddable texts in one call; a failed call
+// embedAll batch-embeds the embeddable texts in both e5 roles — queries
+// for matching, passages for storage — in one call pair; a failed call
 // degrades the whole tier for this request rather than retrying per item.
-func (a *Assigner) embedAll(ctx context.Context, texts []string) [][]float32 {
+func (a *Assigner) embedAll(ctx context.Context, texts []string) (queries, docs [][]float32) {
 	var idxs []int
 	var in []string
 	for i, t := range texts {
@@ -383,22 +407,35 @@ func (a *Assigner) embedAll(ctx context.Context, texts []string) [][]float32 {
 		}
 	}
 	if len(in) == 0 {
-		return nil
+		return nil, nil
 	}
-	vecs, err := a.emb.Embed(ctx, in)
+	qv, err := a.qemb.Embed(ctx, in)
 	if err != nil {
 		slog.Warn("group: embed batch failed", slog.Int("texts", len(in)), slog.Any("error", err))
 		groupAssign.WithLabelValues("embed", "embed_error").Inc()
-		return nil
+		return nil, nil
 	}
-	out := make([][]float32, len(texts))
-	for j, v := range vecs {
+	dv, err := a.demb.Embed(ctx, in)
+	if err != nil {
+		slog.Warn("group: embed batch failed", slog.Int("texts", len(in)), slog.Any("error", err))
+		groupAssign.WithLabelValues("embed", "embed_error").Inc()
+		return nil, nil
+	}
+	queries = make([][]float32, len(texts))
+	docs = make([][]float32, len(texts))
+	for j, v := range qv {
 		if j >= len(idxs) {
 			break // a misbehaving server returning extras must not panic
 		}
-		out[idxs[j]] = v
+		queries[idxs[j]] = v
 	}
-	return out
+	for j, v := range dv {
+		if j >= len(idxs) {
+			break
+		}
+		docs[idxs[j]] = v
+	}
+	return queries, docs
 }
 
 func vecsAt(vecs [][]float32, i int) []float32 {
