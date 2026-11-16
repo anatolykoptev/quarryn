@@ -271,10 +271,11 @@ func runReembedGroups(cfg config.Config, args []string) error {
 		return err
 	}
 	defer func() { _ = emb.Close() }()
-	stats, err := group.Reembed(ctx, store, emb, *batch, *fromID)
+	stats, err := group.Reembed(ctx, store, emb, cfg.EmbedModel, *batch, *fromID)
 	slog.Info("reembed-groups done",
 		slog.Int("scanned", stats.Scanned), slog.Int("updated", stats.Updated),
-		slog.Int("skipped", stats.Skipped), slog.Int("failed", stats.Failed))
+		slog.Int("skipped", stats.Skipped), slog.Int("failed", stats.Failed),
+		slog.Int("conflicts", stats.Conflicts), slog.Int64("resume_from_id", stats.ResumeID))
 	return err
 }
 
