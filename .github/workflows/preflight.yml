@@ -269,10 +269,11 @@ jobs:
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          # v2.12.2 is built with Go >= 1.26, compatible with the 1.26.x
-          # toolchain pin above.
+          # v2.15.0 is built with Go 1.27, i.e. not older than the 1.26.x
+          # toolchain pin above (the linter must never be built with an older
+          # Go than the one it type-checks with).
           install-only: true
-          version: v2.12.2
+          version: v2.15.0
 
       - name: make preflight
         env:
