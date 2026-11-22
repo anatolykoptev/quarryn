@@ -6,14 +6,14 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	kitdbtest "github.com/anatolykoptev/go-kit/pgutil/dbtest"
 )
 
 func liveStore(t *testing.T) *Store {
 	t.Helper()
 	dsn := os.Getenv("PG_LIVE_DSN")
-	if dsn == "" {
-		t.Skip("PG_LIVE_DSN unset — live postgres smoke skipped")
-	}
+	kitdbtest.MustBeScratch(t, dsn) // skips when unset; refuses a server that holds real data
 	st, err := NewStore(context.Background(), dsn, 4)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -130,9 +130,7 @@ func TestLivePGGroupModelSpace(t *testing.T) {
 // dim different from the existing column must refuse to start.
 func TestLivePGGroupDim(t *testing.T) {
 	dsn := os.Getenv("PG_LIVE_DSN")
-	if dsn == "" {
-		t.Skip("PG_LIVE_DSN unset — live postgres smoke skipped")
-	}
+	kitdbtest.MustBeScratch(t, dsn) // skips when unset; refuses a server that holds real data
 	ctx := context.Background()
 	st, err := NewStore(ctx, dsn, 4)
 	if err != nil {
