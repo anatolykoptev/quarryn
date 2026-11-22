@@ -8,6 +8,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -336,7 +337,9 @@ func seedGroup(ctx context.Context, tx pgx.Tx, label string, vec []float32, mode
 // carries vec, advances the group centroid by a running mean — e5 vectors
 // are L2-normalised so the renormalised mean stays a valid centroid. A
 // re-seen URL refreshes last_seen but never re-folds: frequently searched
-// offers must not skew the representative.
+// offers must not skew the representative. Every new member row moves the
+// group's updated_at revision — even one that did not fold a vector — so
+// a re-embed snapshot taken before it always fails its compare-and-set.
 func (s *Store) AddMember(ctx context.Context, gid int64, m Member, vec []float32, exactKeys []string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -348,38 +351,20 @@ func (s *Store) AddMember(ctx context.Context, gid int64, m Member, vec []float3
 	if err != nil {
 		return err
 	}
+	folded := false
 	if inserted && len(vec) > 0 {
-		var emb string
-		var n int
-		err := tx.QueryRow(ctx,
-			`SELECT COALESCE(embedding::text, ''), members FROM product_groups WHERE id = $1 FOR UPDATE`, gid).
-			Scan(&emb, &n)
-		if err != nil {
+		if folded, err = foldVector(ctx, tx, gid, vec); err != nil {
 			return err
 		}
-		switch cur := parseVector(emb); {
-		case len(cur) == len(vec):
-			// Running mean over the n vectors folded so far.
-			next := make([]float32, len(cur))
-			for i := range cur {
-				next[i] = (cur[i]*float32(n) + vec[i]) / float32(n+1)
-			}
-			l2norm(next)
-			if _, err := tx.Exec(ctx,
-				`UPDATE product_groups SET embedding = $1::vector, members = $2, updated_at = now() WHERE id = $3`,
-				vectorLit(next), n+1, gid); err != nil {
-				return err
-			}
-		case len(cur) == 0:
-			// First vector for a group seeded without one.
-			if _, err := tx.Exec(ctx,
-				`UPDATE product_groups SET embedding = $1::vector, members = 1, updated_at = now() WHERE id = $2`,
-				vectorLit(vec), gid); err != nil {
-				return err
-			}
+	}
+	if inserted && !folded {
+		// A membership change that did not move the centroid still
+		// invalidates a re-embed snapshot — bump the revision it
+		// compare-and-sets on.
+		if _, err := tx.Exec(ctx,
+			`UPDATE product_groups SET updated_at = now() WHERE id = $1`, gid); err != nil {
+			return err
 		}
-		// A stored vector of a different dimension belongs to another
-		// model space — leave the centroid untouched.
 	}
 	for _, k := range exactKeys {
 		if _, err := tx.Exec(ctx, `
@@ -389,6 +374,122 @@ func (s *Store) AddMember(ctx context.Context, gid int64, m Member, vec []float3
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// foldVector advances a group centroid by vec inside tx — the running
+// mean over the members count so far — reporting whether the fold
+// happened. A stored vector of a different dimension belongs to another
+// model space and is left untouched.
+func foldVector(ctx context.Context, tx pgx.Tx, gid int64, vec []float32) (bool, error) {
+	var emb string
+	var n int
+	err := tx.QueryRow(ctx,
+		`SELECT COALESCE(embedding::text, ''), members FROM product_groups WHERE id = $1 FOR UPDATE`, gid).
+		Scan(&emb, &n)
+	if err != nil {
+		return false, err
+	}
+	switch cur := parseVector(emb); {
+	case len(cur) == len(vec):
+		// Running mean over the n vectors folded so far.
+		next := make([]float32, len(cur))
+		for i := range cur {
+			next[i] = (cur[i]*float32(n) + vec[i]) / float32(n+1)
+		}
+		l2norm(next)
+		if _, err := tx.Exec(ctx,
+			`UPDATE product_groups SET embedding = $1::vector, members = $2, updated_at = now() WHERE id = $3`,
+			vectorLit(next), n+1, gid); err != nil {
+			return false, err
+		}
+		return true, nil
+	case len(cur) == 0:
+		// First vector for a group seeded without one.
+		if _, err := tx.Exec(ctx,
+			`UPDATE product_groups SET embedding = $1::vector, members = 1, updated_at = now() WHERE id = $2`,
+			vectorLit(vec), gid); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// embeddingGroups lists centroid-carrying groups in id order after
+// afterID — the reembed-groups command pages through them for the
+// prefix migration. Only rows in the configured model's space qualify:
+// a foreign-model centroid rewritten by this binary's vectors would be
+// silently corrupted. Groups without an embedding stay unreachable to
+// Nearest today, so the pass leaves them alone.
+func (s *Store) embeddingGroups(ctx context.Context, model string, afterID int64, limit int) ([]embeddingGroup, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, label FROM product_groups
+		 WHERE embedding IS NOT NULL AND model = $1 AND id > $2
+		 ORDER BY id LIMIT $3`, model, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []embeddingGroup
+	for rows.Next() {
+		var g embeddingGroup
+		if err := rows.Scan(&g.ID, &g.Label); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+// foldableTitles lists the member titles that folded a vector into the
+// group centroid, in fold order — 'exact'-provenance members claimed
+// identity without carrying a vector, and a title that fails
+// embeddable() never embedded in the first place. The group's updated_at
+// comes back with them: the revision the setEmbedding compare-and-set
+// checks, captured before the titles so an intervening AddMember always
+// shows as a moved revision.
+func (s *Store) foldableTitles(ctx context.Context, gid int64) ([]string, time.Time, error) {
+	var rev time.Time
+	if err := s.pool.QueryRow(ctx,
+		`SELECT updated_at FROM product_groups WHERE id = $1`, gid).Scan(&rev); err != nil {
+		return nil, time.Time{}, err
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT title FROM product_group_members
+		 WHERE group_id = $1 AND match <> 'exact' AND title <> ''
+		 ORDER BY first_seen, url`, gid)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, time.Time{}, err
+		}
+		out = append(out, t)
+	}
+	return out, rev, rows.Err()
+}
+
+// setEmbedding replaces a group's centroid and sample count — but only
+// while the row still carries seenRev (its updated_at when the titles
+// were read) and the model's own space. An AddMember committing between
+// the read and this write moved the revision: the compare-and-set then
+// touches no row, applied=false, and the caller defers the group to the
+// next pass instead of overwriting the concurrent update. The re-embed
+// pass writes straight through, one row per call, so a stop mid-sweep
+// leaves only finished groups migrated.
+func (s *Store) setEmbedding(ctx context.Context, gid int64, model string, vec []float32, members int, seenRev time.Time) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE product_groups SET embedding = $1::vector, members = $2, updated_at = now()
+		  WHERE id = $3 AND model = $4 AND updated_at = $5`,
+		vectorLit(vec), members, gid, model, seenRev)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // insertMember inserts the offer row, reporting whether it was new. A

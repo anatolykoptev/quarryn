@@ -6,9 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/anatolykoptev/go-kit/embed"
@@ -34,6 +37,17 @@ var version = "1.27.2" // x-release-please-version
 
 func main() {
 	cfg := config.Load()
+
+	// One-off operator commands dispatch before the serving path comes
+	// up — they must not bind the metrics port or the listener.
+	if len(os.Args) > 1 && os.Args[1] == "reembed-groups" {
+		if err := runReembedGroups(cfg, os.Args[2:]); err != nil {
+			slog.Error("reembed-groups failed", slog.Any("error", err))
+			os.Exit(1)
+		}
+		return
+	}
+
 	startPrometheusScrape(cfg.PromPort, slog.Default())
 
 	if err := runMCPServer(cfg); err != nil {
@@ -189,29 +203,80 @@ func newGrouper(cfg config.Config) (*group.Assigner, *group.Store) {
 	}
 	var emb embed.Embedder
 	if cfg.EmbedURL != "" {
-		// Same client recipe as go-search: bearer from EMBED_TOKEN,
-		// process-local LRU, chunk cap matching the embed-server's
-		// EMBED_MAX_INPUT_ARRAY, and a circuit breaker so a dead
-		// sidecar fails fast instead of stalling every search.
-		c, cerr := embed.NewClient(cfg.EmbedURL,
-			embed.WithModel(cfg.EmbedModel),
-			embed.WithDim(cfg.EmbedDim),
-			embed.WithTimeout(15*time.Second),
-			embed.WithChunkSize(32),
-			embed.WithCircuit(embed.CircuitConfig{}),
-			embed.WithCache(group.NewEmbedCache(2048)),
-		)
+		var cerr error
+		emb, cerr = newEmbedClient(cfg)
 		if cerr != nil {
 			slog.Warn("embedder init failed — exact-tier grouping only",
 				slog.String("url", cfg.EmbedURL), slog.Any("error", cerr))
-		} else {
-			emb = c
+			emb = nil
 		}
 	}
 	slog.Info("group assigner up",
 		slog.String("model", cfg.EmbedModel), slog.Bool("embedder", emb != nil))
 	return group.NewAssigner(store, emb, cfg.EmbedModel,
 		float32(cfg.GroupEmbedThreshold), float32(cfg.GroupEmbedWeak), cfg.GroupTopK), store
+}
+
+// newEmbedClient builds the fleet embed-server client — the same recipe
+// as go-search: bearer from EMBED_TOKEN, process-local LRU, chunk cap
+// matching the embed-server's EMBED_MAX_INPUT_ARRAY, and a circuit
+// breaker so a dead sidecar fails fast instead of stalling every call.
+func newEmbedClient(cfg config.Config) (embed.Embedder, error) {
+	if cfg.EmbedURL == "" {
+		return nil, nil
+	}
+	return embed.NewClient(cfg.EmbedURL,
+		embed.WithModel(cfg.EmbedModel),
+		embed.WithDim(cfg.EmbedDim),
+		embed.WithTimeout(15*time.Second),
+		embed.WithChunkSize(32),
+		embed.WithCircuit(embed.CircuitConfig{}),
+		embed.WithCache(group.NewEmbedCache(2048)),
+	)
+}
+
+// runReembedGroups is the one-off migration that rewrites stored group
+// centroids into the passage-prefixed e5 space, needed once after the
+// assigner gained role prefixes — vectors embedded before the change
+// were computed from bare text and live in a different retrieval space.
+//
+//	quarryn reembed-groups [-batch N] [-from-id ID]
+//
+// It walks product_groups id-ascending in batches, recomputes each
+// centroid from the member titles that folded it and writes one row at
+// a time — an interrupted run resumes with -from-id, and a re-run
+// converges to the same vectors. Running it is an operator step.
+func runReembedGroups(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("reembed-groups", flag.ContinueOnError)
+	batch := fs.Int("batch", 64, "groups scanned per page")
+	fromID := fs.Int64("from-id", 0, "resume after this product_groups id")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if cfg.GroupsDatabaseURL == "" {
+		return errors.New("GROUPS_DATABASE_URL unset")
+	}
+	if cfg.EmbedURL == "" {
+		return errors.New("EMBED_URL unset")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	store, err := group.NewStore(ctx, cfg.GroupsDatabaseURL, cfg.EmbedDim)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	emb, err := newEmbedClient(cfg)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = emb.Close() }()
+	stats, err := group.Reembed(ctx, store, emb, cfg.EmbedModel, *batch, *fromID)
+	slog.Info("reembed-groups done",
+		slog.Int("scanned", stats.Scanned), slog.Int("updated", stats.Updated),
+		slog.Int("skipped", stats.Skipped), slog.Int("failed", stats.Failed),
+		slog.Int("conflicts", stats.Conflicts), slog.Int64("resume_from_id", stats.ResumeID))
+	return err
 }
 
 // probeRunner picks the acceptance-probe backend: the pipeline's own
